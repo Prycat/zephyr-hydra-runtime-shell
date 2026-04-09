@@ -15,6 +15,8 @@ try:
     gpu = torch.cuda.get_device_name(0)
     vram_gb = torch.cuda.get_device_properties(0).total_memory / 1e9
     print(f"GPU: {gpu} ({vram_gb:.1f} GB VRAM)")
+    if vram_gb < 14:
+        print(f"WARNING: {vram_gb:.1f} GB VRAM may be insufficient (model needs ~16 GB)")
 except ImportError:
     print("ERROR: PyTorch not installed. Run install.bat first.")
     sys.exit(1)
@@ -25,25 +27,27 @@ except ImportError:
 try:
     import turboquant
     from turboquant.vllm_attn_backend import apply_turboquant_patch
-    apply_turboquant_patch(bits_k=3, bits_v=4)
-    print("TurboQuant patch applied: 3-bit keys, 4-bit values")
+    if hasattr(turboquant, "vllm_attn_backend") and hasattr(turboquant.vllm_attn_backend, "apply_turboquant_patch"):
+        apply_turboquant_patch(bits_k=3, bits_v=4)
+        print("TurboQuant patch applied: 3-bit keys, 4-bit values")
+    else:
+        # Older versions apply the patch at import time — no explicit call needed
+        print("TurboQuant patch applied at import (no explicit call required)")
 except ImportError as e:
     print(f"ERROR: TurboQuant not found ({e})")
     print("Run install.bat first.")
     sys.exit(1)
-except AttributeError:
-    # Fallback: some versions apply the patch at import, no explicit call needed
-    print("TurboQuant patch applied at import (no explicit call required)")
 
 # ── Launch vLLM OpenAI server ─────────────────────────────────────────────────
 MODEL = "NousResearch/Hermes-3-Llama-3.1-8B"
 PORT  = 8000
 
-print(f"\nStarting vLLM server...")
+print("\nStarting vLLM server...")
 print(f"  Model : {MODEL}")
 print(f"  Port  : {PORT}")
 print(f"  URL   : http://localhost:{PORT}/v1")
-print(f"\nFirst run will download ~16 GB from HuggingFace. Subsequent runs use cache.\n")
+print(f"  Host  : 0.0.0.0 (accessible on local network)")
+print("\nFirst run will download ~16 GB from HuggingFace. Subsequent runs use cache.\n")
 
 try:
     from vllm.entrypoints.openai.api_server import run_server
@@ -65,4 +69,8 @@ try:
 except ImportError as e:
     print(f"ERROR: vLLM not found ({e})")
     print("Run install.bat first.")
+    sys.exit(1)
+except Exception as e:
+    print(f"ERROR: vLLM server failed to start: {e}")
+    print("Common causes: port 8000 already in use, out of VRAM, bad --max-model-len")
     sys.exit(1)
