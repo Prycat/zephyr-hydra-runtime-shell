@@ -1,4 +1,5 @@
 @echo off
+setlocal
 echo === TurboQuant + vLLM Setup ===
 
 REM Check Python
@@ -23,7 +24,18 @@ if errorlevel 1 (
 
 REM Install vLLM 0.18.0 (TurboQuant targets this exact version)
 echo Installing vLLM 0.18.0...
-pip install vllm==0.18.0 || (echo ERROR: vLLM install failed && exit /b 1)
+pip install vllm==0.18.0
+if errorlevel 1 (
+    echo ERROR: vLLM install failed. Try: pip install vllm==0.18.0 --extra-index-url https://download.pytorch.org/whl/cu121
+    exit /b 1
+)
+
+REM Check git is available
+git --version >nul 2>&1
+if errorlevel 1 (
+    echo ERROR: git not found. Install Git for Windows: https://git-scm.com/download/win
+    exit /b 1
+)
 
 REM Clone TurboQuant if not already present
 if not exist turboquant (
@@ -35,9 +47,14 @@ if not exist turboquant (
 
 REM Install TurboQuant
 echo Installing TurboQuant...
-cd turboquant
-pip install -e . || (echo ERROR: TurboQuant install failed && exit /b 1)
-cd ..
+pushd turboquant
+pip install -e .
+if errorlevel 1 (
+    popd
+    echo ERROR: TurboQuant install failed
+    exit /b 1
+)
+popd
 
 echo.
 echo === Setup complete! ===
