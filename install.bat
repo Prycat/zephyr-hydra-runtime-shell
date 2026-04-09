@@ -4,11 +4,20 @@ echo === TurboQuant + vLLM Setup ===
 REM Check Python
 python --version || (echo ERROR: Python not found && exit /b 1)
 
+REM Check torch is installed
+python -c "import torch" 2>nul
+if errorlevel 1 (
+    echo ERROR: PyTorch not installed. Install it with CUDA support first:
+    echo   pip install torch --index-url https://download.pytorch.org/whl/cu121
+    exit /b 1
+)
+
 REM Check CUDA
-python -c "import torch; assert torch.cuda.is_available(), 'CUDA not available'" 2>nul
+python -c "import torch; exit(0 if torch.cuda.is_available() else 1)"
 if errorlevel 1 (
     echo ERROR: CUDA not available. vLLM requires an NVIDIA GPU with CUDA.
-    echo Tip: Install PyTorch with CUDA first: https://pytorch.org/get-started/locally/
+    echo Tip: Check your NVIDIA drivers and CUDA toolkit installation.
+    echo      https://pytorch.org/get-started/locally/
     exit /b 1
 )
 
