@@ -1,14 +1,16 @@
 """
-Hermes 3 local tool-using agent via Ollama.
-Uses Ollama's OpenAI-compatible API endpoint.
+Hermes 3 local tool-using agent via vLLM + TurboQuant.
+Uses vLLM's OpenAI-compatible API endpoint (localhost:8000).
+Run start_server.py before this script.
 """
 
 import json
 import math
 import datetime
+import httpx
 from openai import OpenAI
 
-# Ollama exposes an OpenAI-compatible API on port 11434
+# vLLM exposes an OpenAI-compatible API on port 8000
 client = OpenAI(
     base_url="http://localhost:8000/v1",
     api_key="unused",  # vLLM does not require an API key by default
@@ -184,10 +186,10 @@ def main():
     print("Type 'exit' or 'quit' to stop, 'clear' to reset history.\n")
 
     # Verify vLLM server is reachable before entering the chat loop
-    import httpx
     try:
-        httpx.get("http://localhost:8000/health", timeout=3)
-    except Exception:
+        response = httpx.get("http://localhost:8000/health", timeout=3)
+        response.raise_for_status()
+    except (httpx.ConnectError, httpx.TimeoutException, httpx.HTTPStatusError):
         print("ERROR: vLLM server not reachable on port 8000.")
         print("Start it first with:  python start_server.py\n")
         return
