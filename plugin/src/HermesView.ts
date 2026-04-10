@@ -1,9 +1,10 @@
-import { ItemView, WorkspaceLeaf } from 'obsidian';
+import { App, ItemView, WorkspaceLeaf } from 'obsidian';
 
 export const VIEW_TYPE_HERMES = 'hermes-agent-view';
 
 export class HermesView extends ItemView {
   private activeTab: string = 'status';
+  private contentEl2: HTMLElement | null = null;
 
   constructor(leaf: WorkspaceLeaf) {
     super(leaf);
@@ -14,14 +15,20 @@ export class HermesView extends ItemView {
   getIcon(): string { return 'brain'; }
 
   async onOpen(): Promise<void> {
-    const root = this.containerEl.children[1] as HTMLElement;
-    root.empty();
-    root.addClass('hermes-root');
-    this.renderTabBar(root);
-    this.renderActiveTab(root);
+    this.contentEl.empty();
+    this.contentEl.addClass('hermes-root');
+
+    // Tab bar — rendered once, persists across tab switches
+    this.renderTabBar(this.contentEl);
+
+    // Content area — replaced on every tab switch
+    this.contentEl2 = this.contentEl.createEl('div', { cls: 'hermes-tab-content' });
+    this.renderActiveTab();
   }
 
-  async onClose(): Promise<void> {}
+  async onClose(): Promise<void> {
+    this.contentEl2 = null;
+  }
 
   private renderTabBar(root: HTMLElement): void {
     const bar = root.createEl('div', { cls: 'hermes-tab-bar' });
@@ -35,14 +42,32 @@ export class HermesView extends ItemView {
       const btn = bar.createEl('button', { text: tab.label, cls: 'hermes-tab-btn' });
       if (tab.id === this.activeTab) btn.addClass('active');
       btn.addEventListener('click', () => {
-        this.activeTab = tab.id;
-        this.onOpen();
+        this.switchTab(tab.id, bar);
       });
     }
   }
 
-  private renderActiveTab(root: HTMLElement): void {
-    const content = root.createEl('div', { cls: 'hermes-tab-content' });
-    content.createEl('p', { text: `${this.activeTab} tab — coming soon`, cls: 'hermes-muted' });
+  private switchTab(tabId: string, bar: HTMLElement): void {
+    this.activeTab = tabId;
+
+    // Update active button styling
+    bar.querySelectorAll('.hermes-tab-btn').forEach((btn, i) => {
+      const tabs = ['status', 'generate', 'review', 'cards'];
+      btn.classList.toggle('active', tabs[i] === tabId);
+    });
+
+    // Only replace content area, not the tab bar
+    if (this.contentEl2) {
+      this.contentEl2.empty();
+      this.renderActiveTab();
+    }
+  }
+
+  private renderActiveTab(): void {
+    if (!this.contentEl2) return;
+    this.contentEl2.createEl('p', {
+      text: `${this.activeTab} tab — coming soon`,
+      cls: 'hermes-muted'
+    });
   }
 }
