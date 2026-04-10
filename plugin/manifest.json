@@ -1,0 +1,9 @@
+{
+  "id": "hermes-agent",
+  "name": "Hermes Agent",
+  "version": "1.0.0",
+  "minAppVersion": "1.4.0",
+  "description": "Local AI knowledge agent powered by Hermes 3 + vLLM + TurboQuant",
+  "author": "Local",
+  "isDesktopOnly": true
+}
