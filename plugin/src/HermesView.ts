@@ -9,6 +9,7 @@ export const VIEW_TYPE_HERMES = 'hermes-agent-view';
 export class HermesView extends ItemView {
   private activeTab: string = 'status';
   private contentEl2: HTMLElement | null = null;
+  private activeTabInstance: { destroy?: () => void } | null = null;
 
   constructor(leaf: WorkspaceLeaf) {
     super(leaf);
@@ -31,6 +32,8 @@ export class HermesView extends ItemView {
   }
 
   async onClose(): Promise<void> {
+    this.activeTabInstance?.destroy?.();
+    this.activeTabInstance = null;
     this.contentEl2 = null;
   }
 
@@ -53,6 +56,8 @@ export class HermesView extends ItemView {
 
   private switchTab(tabId: string, bar: HTMLElement): void {
     this.activeTab = tabId;
+    this.activeTabInstance?.destroy?.();
+    this.activeTabInstance = null;
 
     // Update active button styling
     bar.querySelectorAll('.hermes-tab-btn').forEach((btn, i) => {
@@ -70,10 +75,20 @@ export class HermesView extends ItemView {
   private renderActiveTab(): void {
     if (!this.contentEl2) return;
     switch (this.activeTab) {
-      case 'status':   new StatusTab(this.contentEl2, this.app);   break;
-      case 'generate': new GenerateTab(this.contentEl2, this.app); break;
-      case 'review':   new ReviewTab(this.contentEl2, this.app);   break;
-      case 'cards':    new CardsTab(this.contentEl2, this.app);    break;
+      case 'status': {
+        const tab = new StatusTab(this.contentEl2, this.app);
+        this.activeTabInstance = tab;
+        break;
+      }
+      case 'generate':
+        this.activeTabInstance = new GenerateTab(this.contentEl2, this.app);
+        break;
+      case 'review':
+        this.activeTabInstance = new ReviewTab(this.contentEl2, this.app);
+        break;
+      case 'cards':
+        this.activeTabInstance = new CardsTab(this.contentEl2, this.app);
+        break;
     }
   }
 }

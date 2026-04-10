@@ -25,6 +25,7 @@ export class StatusTab {
         fetch(HEALTH_URL, { signal: AbortSignal.timeout(3000) }),
         fetch(MODELS_URL, { signal: AbortSignal.timeout(3000) }),
       ]);
+      if (!healthRes.ok) throw new Error(`health returned ${healthRes.status}`);
       const modelsJson = await modelsRes.json();
       const model: string = modelsJson?.data?.[0]?.id ?? 'unknown';
       this.renderOnline(model);

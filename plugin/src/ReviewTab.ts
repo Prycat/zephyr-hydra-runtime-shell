@@ -14,7 +14,9 @@ export class ReviewTab {
   constructor(container: HTMLElement, app: App) {
     this.container = container;
     this.app = app;
-    this.render();
+    this.render().catch(err => {
+      this.container.createEl('p', { text: `Error loading review: ${err}`, cls: 'hermes-muted' });
+    });
   }
 
   private async render(): Promise<void> {

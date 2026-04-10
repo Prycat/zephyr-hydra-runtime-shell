@@ -5,6 +5,10 @@ const MODEL     = 'NousResearch/Hermes-3-Llama-3.1-8B';
 const WIKI_DIR  = 'Wiki';
 const CARDS_DIR = 'Flashcards';
 
+function sanitizeName(name: string): string {
+  return name.replace(/[:\\/*?"<>|]/g, '-').trim();
+}
+
 export class CardsTab {
   private container: HTMLElement;
   private app: App;
@@ -12,7 +16,9 @@ export class CardsTab {
   constructor(container: HTMLElement, app: App) {
     this.container = container;
     this.app = app;
-    this.render();
+    this.render().catch(err => {
+      this.container.createEl('p', { text: `Error loading cards: ${err}`, cls: 'hermes-muted' });
+    });
   }
 
   private async render(): Promise<void> {
@@ -31,7 +37,7 @@ export class CardsTab {
   private renderRow(file: TFile): void {
     const card = this.container.createEl('div', { cls: 'hermes-article-card' });
     card.createEl('div', { text: file.basename, cls: 'title' });
-    const cardsPath = `${CARDS_DIR}/${file.basename} - Cards.md`;
+    const cardsPath = `${CARDS_DIR}/${sanitizeName(file.basename)} - Cards.md`;
     const existing = this.app.vault.getAbstractFileByPath(cardsPath);
 
     if (existing instanceof TFile) {
@@ -46,6 +52,7 @@ export class CardsTab {
 
   private async generate(file: TFile, card: HTMLElement): Promise<void> {
     const btn = card.querySelector('button') as HTMLButtonElement;
+    const originalLabel = btn ? btn.textContent ?? '🃏 Generate Cards' : '🃏 Generate Cards';
     if (btn) { btn.disabled = true; btn.textContent = 'Generating…'; }
     try {
       const content = await this.app.vault.read(file);
@@ -69,17 +76,19 @@ export class CardsTab {
       const cards = json.choices[0].message.content as string;
       await this.saveCards(file.basename, cards);
       new Notice(`Cards saved: ${file.basename}`);
-      this.render();
+      this.render().catch(err => {
+        this.container.createEl('p', { text: `Error loading cards: ${err}`, cls: 'hermes-muted' });
+      });
     } catch (e) {
       new Notice(`Error: ${(e as Error).message}`);
-      if (btn) { btn.disabled = false; btn.textContent = '🃏 Generate Cards'; }
+      if (btn) { btn.disabled = false; btn.textContent = originalLabel; }
     }
   }
 
   private async saveCards(topic: string, cards: string): Promise<void> {
     const { vault } = this.app;
     if (!vault.getAbstractFileByPath(CARDS_DIR)) await vault.createFolder(CARDS_DIR);
-    const path = `${CARDS_DIR}/${topic} - Cards.md`;
+    const path = `${CARDS_DIR}/${sanitizeName(topic)} - Cards.md`;
     const content = `# ${topic} — Flashcards\n\n${cards}\n`;
     const existing = vault.getAbstractFileByPath(path);
     if (existing instanceof TFile) {

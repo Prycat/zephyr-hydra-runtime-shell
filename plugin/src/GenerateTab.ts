@@ -4,6 +4,10 @@ const VLLM_URL = 'http://localhost:8000/v1/chat/completions';
 const MODEL    = 'NousResearch/Hermes-3-Llama-3.1-8B';
 const WIKI_DIR = 'Wiki';
 
+function sanitizeName(name: string): string {
+  return name.replace(/[:\\/*?"<>|]/g, '-').trim();
+}
+
 export class GenerateTab {
   private container: HTMLElement;
   private app: App;
@@ -38,8 +42,9 @@ export class GenerateTab {
       status.textContent = 'Calling Hermes…';
       try {
         const article = await this.generateArticle(topic);
+        const safeTopic = sanitizeName(topic);
         await this.saveArticle(topic, article);
-        status.textContent = `✅ Saved to Wiki/${topic}.md`;
+        status.textContent = `✅ Saved to Wiki/${safeTopic}.md`;
         input.value = '';
       } catch (e) {
         status.textContent = `❌ ${(e as Error).message}`;
@@ -75,7 +80,8 @@ export class GenerateTab {
     if (!vault.getAbstractFileByPath(WIKI_DIR)) await vault.createFolder(WIKI_DIR);
     const today = new Date().toISOString().split('T')[0];
     const fm = `---\nstatus: draft\ncreated: ${today}\ntopic: ${topic}\n---\n\n`;
-    const path = `${WIKI_DIR}/${topic}.md`;
+    const safeTopic = sanitizeName(topic);
+    const path = `${WIKI_DIR}/${safeTopic}.md`;
     const existing = vault.getAbstractFileByPath(path);
     if (existing instanceof TFile) {
       await vault.modify(existing, fm + body);
