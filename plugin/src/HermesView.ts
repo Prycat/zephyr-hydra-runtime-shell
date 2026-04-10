@@ -1,4 +1,8 @@
 import { App, ItemView, WorkspaceLeaf } from 'obsidian';
+import { StatusTab } from './StatusTab';
+import { GenerateTab } from './GenerateTab';
+import { ReviewTab } from './ReviewTab';
+import { CardsTab } from './CardsTab';
 
 export const VIEW_TYPE_HERMES = 'hermes-agent-view';
 
@@ -65,9 +69,11 @@ export class HermesView extends ItemView {
 
   private renderActiveTab(): void {
     if (!this.contentEl2) return;
-    this.contentEl2.createEl('p', {
-      text: `${this.activeTab} tab — coming soon`,
-      cls: 'hermes-muted'
-    });
+    switch (this.activeTab) {
+      case 'status':   new StatusTab(this.contentEl2, this.app);   break;
+      case 'generate': new GenerateTab(this.contentEl2, this.app); break;
+      case 'review':   new ReviewTab(this.contentEl2, this.app);   break;
+      case 'cards':    new CardsTab(this.contentEl2, this.app);    break;
+    }
   }
 }
