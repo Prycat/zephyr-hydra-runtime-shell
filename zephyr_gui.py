@@ -750,3 +750,163 @@ class PaletteWidget(QWidget):
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
         outer.addWidget(scroll)
+
+
+# ═══════════════════════════════════════════════════════════════
+#  MainWindow
+# ═══════════════════════════════════════════════════════════════
+class MainWindow(QMainWindow):
+
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle("Zephyr — Prycat Research")
+        self.resize(1100, 700)
+        self.setMinimumSize(800, 500)
+
+        # ── Central widget ────────────────────────────────────
+        central = QWidget()
+        self.setCentralWidget(central)
+        root = QVBoxLayout(central)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
+
+        # Header
+        self._header = HeaderBar()
+        root.addWidget(self._header)
+
+        # Thin divider line
+        div = QFrame()
+        div.setFrameShape(QFrame.Shape.HLine)
+        div.setStyleSheet("color: rgba(255,255,255,0.06); margin: 0;")
+        root.addWidget(div)
+
+        # Splitter: console left | palette right
+        splitter = QSplitter(Qt.Orientation.Horizontal)
+        splitter.setStyleSheet("""
+            QSplitter::handle {
+                background: #1a2030;
+                width: 2px;
+            }
+        """)
+
+        # Left pane: console + input row
+        left_widget = QWidget()
+        left_layout = QVBoxLayout(left_widget)
+        left_layout.setContentsMargins(0, 0, 0, 0)
+        left_layout.setSpacing(0)
+
+        self._console = ConsoleWidget()
+        left_layout.addWidget(self._console)
+
+        # Input row
+        input_row = QWidget()
+        input_row.setStyleSheet(
+            "background: #0d1117; border-top: 1px solid rgba(255,255,255,0.06);"
+        )
+        input_row_layout = QHBoxLayout(input_row)
+        input_row_layout.setContentsMargins(8, 6, 8, 6)
+        input_row_layout.setSpacing(6)
+
+        self._input = InputBar()
+        input_row_layout.addWidget(self._input)
+
+        send_btn = QPushButton("SEND")
+        send_btn.setFixedWidth(64)
+        send_btn.setFixedHeight(34)
+        send_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        send_btn.setStyleSheet("""
+            QPushButton {
+                background: rgba(77,194,179,0.12);
+                color: rgba(128,221,202,0.9);
+                border: 1px solid rgba(77,194,179,0.25);
+                border-radius: 4px;
+                font-family: Consolas, monospace;
+                font-size: 10px;
+                letter-spacing: 2px;
+            }
+            QPushButton:hover {
+                background: rgba(77,194,179,0.22);
+                border-color: rgba(77,194,179,0.45);
+            }
+            QPushButton:pressed {
+                background: rgba(77,194,179,0.08);
+            }
+        """)
+        send_btn.clicked.connect(self._input._fire)
+        input_row_layout.addWidget(send_btn)
+        left_layout.addWidget(input_row)
+
+        # Right pane: palette
+        self._palette = PaletteWidget()
+
+        splitter.addWidget(left_widget)
+        splitter.addWidget(self._palette)
+        splitter.setStretchFactor(0, 2)
+        splitter.setStretchFactor(1, 1)
+        splitter.setSizes([740, 360])
+        root.addWidget(splitter)
+
+        # ── Wire subprocess ───────────────────────────────────
+        self._process = ZephyrProcess(self)
+        self._process.output_signal.connect(self._console.append_line)
+        self._process.finished_signal.connect(self._on_agent_exit)
+        self._process.start()
+
+        # ── Wire input → process ──────────────────────────────
+        self._input.submitted.connect(self._on_user_input)
+
+        # ── Wire palette → input ──────────────────────────────
+        self._palette.command_requested.connect(self._on_command_requested)
+
+    def _on_user_input(self, text: str):
+        self._console.append_line(f"You: {text}")
+        self._process.send_input(text)
+
+    def _on_command_requested(self, command: str, fire: bool):
+        self._input.inject(command, fire)
+
+    def _on_agent_exit(self):
+        self._console.append_line("─── Zephyr process ended ───")
+
+    def closeEvent(self, event):
+        self._process.stop()
+        self._process.wait(2000)
+        super().closeEvent(event)
+
+
+# ═══════════════════════════════════════════════════════════════
+#  Global stylesheet
+# ═══════════════════════════════════════════════════════════════
+GLOBAL_QSS = """
+QMainWindow, QWidget {
+    background-color: #090c10;
+    color: rgba(128,221,202,0.92);
+    font-family: Consolas, monospace;
+}
+
+QToolTip {
+    background-color: #0d1117;
+    color: rgba(128,221,202,0.9);
+    border: 1px solid rgba(77,194,179,0.3);
+    font-family: Consolas, monospace;
+    font-size: 10px;
+    padding: 6px 10px;
+    border-radius: 4px;
+}
+
+QSplitter::handle {
+    background: #1a2030;
+}
+"""
+
+
+# ═══════════════════════════════════════════════════════════════
+#  Entry point
+# ═══════════════════════════════════════════════════════════════
+if __name__ == "__main__":
+    app = QApplication(sys.argv)
+    app.setApplicationName("Zephyr")
+    app.setStyleSheet(GLOBAL_QSS)
+    window = MainWindow()
+    window.show()
+    sys.exit(app.exec())
