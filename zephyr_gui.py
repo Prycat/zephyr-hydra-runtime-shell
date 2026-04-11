@@ -308,4 +308,85 @@ class ZephyrButton(QPushButton):
         p.setPen(Qt.PenStyle.NoPen)
         p.drawEllipse(dot_x - dot_r, dot_y - dot_r, dot_r * 2, dot_r * 2)
 
+
+# ═══════════════════════════════════════════════════════════════
+#  ConsoleWidget
+# ═══════════════════════════════════════════════════════════════
+class ConsoleWidget(QPlainTextEdit):
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setReadOnly(True)
+        self.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)
+        self._auto_scroll = True
+
+        font = QFont("Consolas", 10)
+        self.setFont(font)
+
+        palette = self.palette()
+        palette.setColor(QPalette.ColorRole.Base, C_BG)
+        palette.setColor(QPalette.ColorRole.Text, C_TEAL)
+        self.setPalette(palette)
+
+        self.setStyleSheet("""
+            QPlainTextEdit {
+                background-color: #090c10;
+                color: rgba(128,221,202,0.92);
+                border: none;
+                selection-background-color: #1a3a40;
+            }
+            QScrollBar:vertical {
+                background: #0d1117;
+                width: 6px;
+                border: none;
+            }
+            QScrollBar::handle:vertical {
+                background: #2a3a4a;
+                border-radius: 3px;
+                min-height: 20px;
+            }
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+                height: 0;
+            }
+        """)
+
+        self.verticalScrollBar().valueChanged.connect(self._on_scroll)
+
+    def _on_scroll(self, value: int):
+        at_bottom = value == self.verticalScrollBar().maximum()
+        self._auto_scroll = at_bottom
+
+    def append_line(self, line: str):
+        """Colorize and append one line from the agent."""
+        stripped = line.strip()
+
+        if stripped.startswith("You:"):
+            color = "#aab6c2"
+        elif stripped.startswith("Zephyr:"):
+            color = "#80ddca"
+        elif any(tok in stripped for tok in ["[tool]", "tool_call", "Running tool"]):
+            color = "#7ab8d8"
+        elif any(tok in stripped for tok in ["Error", "error", "Traceback", "failed", "Failed"]):
+            color = "#d4a050"
+        elif stripped.startswith("─") or stripped.startswith("=") or stripped.startswith("━"):
+            color = "#445566"
+        else:
+            color = "#80ddca"
+
+        safe = (line
+                .replace("&", "&amp;")
+                .replace("<", "&lt;")
+                .replace(">", "&gt;"))
+        html = (
+            f'<span style="color:{color}; '
+            f'font-family:Consolas,monospace; '
+            f'white-space:pre;">{safe}</span>'
+        )
+        self.appendHtml(html)
+
+        if self._auto_scroll:
+            self.verticalScrollBar().setValue(
+                self.verticalScrollBar().maximum()
+            )
+
         p.end()
