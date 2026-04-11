@@ -467,3 +467,59 @@ class InputBar(QLineEdit):
                 self.setCursorPosition(len(self.text()))
             return
         super().keyPressEvent(event)
+
+
+# ═══════════════════════════════════════════════════════════════
+#  HeaderBar
+# ═══════════════════════════════════════════════════════════════
+class HeaderBar(QWidget):
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setFixedHeight(40)
+        self.setStyleSheet("background-color: #0d1117;")
+
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(16, 0, 16, 0)
+        layout.setSpacing(10)
+
+        # Pulsing dot
+        self._dot = QLabel("●")
+        self._dot.setStyleSheet("color: rgba(102,196,122,0.95); font-size: 10px;")
+        layout.addWidget(self._dot)
+
+        # ZEPHYR label
+        title = QLabel("ZEPHYR")
+        title.setStyleSheet("""
+            color: rgba(128,221,202,0.92);
+            font-family: Consolas, monospace;
+            font-size: 13px;
+            font-weight: bold;
+            letter-spacing: 4px;
+        """)
+        layout.addWidget(title)
+
+        # Model name
+        model_lbl = QLabel(MODEL_NAME)
+        model_lbl.setStyleSheet("""
+            color: rgba(170,182,194,0.5);
+            font-family: Consolas, monospace;
+            font-size: 10px;
+            letter-spacing: 2px;
+        """)
+        layout.addWidget(model_lbl)
+        layout.addStretch()
+
+        # Dot pulse timer
+        self._dot_on = True
+        dot_timer = QTimer(self)
+        dot_timer.setInterval(750)
+        dot_timer.timeout.connect(self._pulse_dot)
+        dot_timer.start()
+
+    def _pulse_dot(self):
+        self._dot_on = not self._dot_on
+        alpha = "0.95" if self._dot_on else "0.35"
+        self._dot.setStyleSheet(
+            f"color: rgba(102,196,122,{alpha}); font-size: 10px;"
+        )
