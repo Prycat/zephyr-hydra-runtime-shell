@@ -123,3 +123,187 @@ class ZephyrProcess(QThread):
                 except OSError:
                     pass
         self._input_q.put(self._SENTINEL)
+
+
+# ═══════════════════════════════════════════════════════════════
+#  ZephyrButton — Monolith Signal custom button
+# ═══════════════════════════════════════════════════════════════
+class ZephyrButton(QPushButton):
+    """
+    Custom button with:
+    - Scanline grain texture
+    - BorderWake breathing pulse
+    - Hover sweep (teal line across top+bottom border)
+    - Mouse-tracking radial glow blob
+    - State dot (idle/running/success/error)
+    """
+
+    SWEEP_MS   = 700      # hover sweep duration in ms
+    WAKE_MS    = 5500     # borderWake pulse period in ms
+    TICK_MS    = 16       # ~60fps timer interval
+
+    def __init__(
+        self,
+        label: str,
+        command: str,
+        tooltip: str,
+        fire_immediately: bool = True,
+        parent=None
+    ):
+        super().__init__(parent)
+        self.label            = label
+        self.command          = command
+        self.fire_immediately = fire_immediately
+        self._state           = "idle"
+
+        # Animation state
+        self._sweep_t       = 0.0
+        self._sweeping      = False
+        self._wake_t        = 0
+        self._mouse_pos     = QPointF(-1, -1)
+        self._mouse_inside  = False
+        self._state_tint_a  = 0.0
+
+        # Timer
+        self._timer = QTimer(self)
+        self._timer.setInterval(self.TICK_MS)
+        self._timer.timeout.connect(self._tick)
+        self._timer.start()
+
+        # Widget setup
+        self.setMouseTracking(True)
+        self.setFixedHeight(52)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setToolTip(tooltip)
+        self.setFlat(True)
+        self.setAttribute(Qt.WidgetAttribute.WA_Hover, True)
+
+    def set_state(self, state: str):
+        """state: idle | running | success | error"""
+        self._state = state
+        if state in ("success", "error"):
+            self._state_tint_a = 1.0
+        else:
+            self._state_tint_a = 0.0
+
+    def _tick(self):
+        dt = self.TICK_MS
+        self._wake_t = (self._wake_t + dt) % self.WAKE_MS
+        if self._sweeping and self._sweep_t < 1.0:
+            self._sweep_t = min(1.0, self._sweep_t + dt / self.SWEEP_MS)
+        if self._state_tint_a > 0:
+            self._state_tint_a = max(0.0, self._state_tint_a - dt / 1200.0)
+        self.update()
+
+    def enterEvent(self, event):
+        self._mouse_inside = True
+        self._sweeping     = True
+        self._sweep_t      = 0.0
+        super().enterEvent(event)
+
+    def leaveEvent(self, event):
+        self._mouse_inside = False
+        self._sweeping     = False
+        self._sweep_t      = 0.0
+        self._mouse_pos    = QPointF(-1, -1)
+        super().leaveEvent(event)
+
+    def mouseMoveEvent(self, event):
+        self._mouse_pos = QPointF(event.position())
+        super().mouseMoveEvent(event)
+
+    def paintEvent(self, event):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        w, h = self.width(), self.height()
+        rect = QRectF(0, 0, w, h)
+
+        # 1. Base fill
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(QBrush(C_SURFACE))
+        p.drawRoundedRect(rect, 4, 4)
+
+        # 2. Scanline grain
+        p.setPen(QPen(QColor(255, 255, 255, 5), 1))
+        y = 0
+        while y < h:
+            p.drawLine(0, y, w, y)
+            y += 3
+
+        # 3. Mouse glow blob
+        if self._mouse_inside and self._mouse_pos.x() >= 0:
+            glow = QRadialGradient(self._mouse_pos, 60)
+            glow.setColorAt(0, QColor(77, 194, 179, 46))
+            glow.setColorAt(1, QColor(77, 194, 179, 0))
+            p.setBrush(QBrush(glow))
+            p.setPen(Qt.PenStyle.NoPen)
+            p.drawRoundedRect(rect, 4, 4)
+
+        # 4. Inner bevel
+        p.setPen(QPen(QColor(255, 255, 255, 8), 1))
+        p.drawLine(1, 1, w - 1, 1)
+        p.drawLine(1, 1, 1, h - 1)
+        p.setPen(QPen(QColor(0, 0, 0, 100), 1))
+        p.drawLine(1, h - 1, w - 1, h - 1)
+        p.drawLine(w - 1, 1, w - 1, h - 1)
+
+        # 5. Resting border
+        p.setPen(QPen(QColor(255, 255, 255, 20), 1))
+        p.setBrush(Qt.BrushStyle.NoBrush)
+        p.drawRoundedRect(rect.adjusted(0.5, 0.5, -0.5, -0.5), 4, 4)
+
+        # 6. BorderWake pulse
+        wake_phase = math.sin(2 * math.pi * self._wake_t / self.WAKE_MS)
+        wake_alpha = int(2 + 6 * (wake_phase * 0.5 + 0.5))
+        p.setPen(QPen(QColor(77, 194, 179, wake_alpha), 1))
+        p.setBrush(Qt.BrushStyle.NoBrush)
+        p.drawRoundedRect(rect.adjusted(0.5, 0.5, -0.5, -0.5), 4, 4)
+
+        # 7. Hover sweep
+        if self._sweep_t > 0:
+            ease = 1.0 - (1.0 - self._sweep_t) ** 3
+            sx = ease * w
+            shard_alpha = int(180 * (1.0 - self._sweep_t))
+            p.setPen(QPen(QColor(128, 221, 202, shard_alpha), 1))
+            p.drawLine(int(sx) - 24, 0, int(sx), 0)
+            p.drawLine(int(sx) - 24, h - 1, int(sx), h - 1)
+
+        # 8. State tint
+        if self._state_tint_a > 0 and self._state in ("success", "error"):
+            tint_color = C_GREEN if self._state == "success" else C_AMBER
+            tint = QColor(tint_color)
+            tint.setAlpha(int(40 * self._state_tint_a))
+            p.setBrush(QBrush(tint))
+            p.setPen(Qt.PenStyle.NoPen)
+            p.drawRoundedRect(rect, 4, 4)
+
+        # 9. Label text
+        font = QFont("Consolas", 9)
+        font.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, 1.5)
+        font.setBold(True)
+        p.setFont(font)
+        text_color = QColor(C_TEAL) if self._mouse_inside else QColor(C_TEAL_DIM)
+        p.setPen(QPen(text_color))
+        text_rect = QRectF(12, 0, w - 30, h)
+        p.drawText(text_rect, Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft, self.label)
+
+        # 10. State dot
+        dot_x = w - 14
+        dot_y = h // 2
+        dot_r = 4
+        if self._state == "idle":
+            dot_color = QColor(255, 255, 255, 40)
+        elif self._state == "running":
+            pulse = math.sin(2 * math.pi * self._wake_t / 800) * 0.5 + 0.5
+            dot_color = QColor(C_AMBER)
+            dot_color.setAlpha(int(120 + 100 * pulse))
+        elif self._state == "success":
+            dot_color = C_GREEN
+        else:
+            dot_color = C_RED
+        p.setBrush(QBrush(dot_color))
+        p.setPen(Qt.PenStyle.NoPen)
+        p.drawEllipse(dot_x - dot_r, dot_y - dot_r, dot_r * 2, dot_r * 2)
+
+        p.end()
