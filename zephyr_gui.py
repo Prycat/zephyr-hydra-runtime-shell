@@ -521,3 +521,232 @@ class HeaderBar(QWidget):
         self._dot.setStyleSheet(
             f"color: rgba(102,196,122,{alpha}); font-size: 10px;"
         )
+
+
+# ═══════════════════════════════════════════════════════════════
+#  PaletteWidget — right command panel
+# ═══════════════════════════════════════════════════════════════
+class SectionDivider(QWidget):
+    """Thin labelled divider between button groups."""
+    def __init__(self, label: str, parent=None):
+        super().__init__(parent)
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(8, 6, 8, 2)
+        lbl = QLabel(label.upper())
+        lbl.setStyleSheet("""
+            color: rgba(170,182,194,0.45);
+            font-family: Consolas, monospace;
+            font-size: 9px;
+            letter-spacing: 3px;
+        """)
+        layout.addWidget(lbl)
+        line = QFrame()
+        line.setFrameShape(QFrame.Shape.HLine)
+        line.setStyleSheet("color: rgba(255,255,255,0.06);")
+        layout.addWidget(line)
+        layout.setStretch(1, 1)
+
+
+class PaletteWidget(QWidget):
+    # Emits (command: str, fire: bool)
+    command_requested = Signal(str, bool)
+
+    BUTTONS = [
+        (
+            "/blackwell",
+            "/blackwell",
+            "Drops Zephyr into a planning space where he interviews you,\n"
+            "and your answers reshape how he sees the world — permanently.",
+            True,
+        ),
+        (
+            "/help",
+            "/help",
+            "Show all available commands.",
+            True,
+        ),
+        (
+            "/tools",
+            "/tools",
+            "List all of Zephyr's active tools.",
+            True,
+        ),
+        (
+            "/search",
+            "/search ",
+            "Raw DuckDuckGo search, instant.\nUsage: /search <query>",
+            False,
+        ),
+        (
+            "/browse",
+            "/browse ",
+            "Fetch a URL directly.\nUsage: /browse <url>",
+            False,
+        ),
+        (
+            "/run",
+            "/run ",
+            "Run Python immediately.\nUsage: /run <code>",
+            False,
+        ),
+        (
+            "/status",
+            "/status",
+            "Check that Ollama is alive and responding.",
+            True,
+        ),
+        (
+            "/model",
+            "/model",
+            "Show current model name and API connection info.",
+            True,
+        ),
+        (
+            "/save",
+            "/save",
+            "Save conversation to Obsidian vault as a formatted .md\n"
+            "with YAML frontmatter (date, time, model, tags).\n"
+            "Usage: /save  or  /save my research chat",
+            True,
+        ),
+        (
+            "/clear",
+            "/clear",
+            "Reset conversation history.\nZephyr will ask for confirmation (y/n).",
+            True,
+        ),
+    ]
+
+    KEYS_BUTTONS = [
+        (
+            "/keys setup",
+            "/keys setup",
+            "Interactive wizard: select provider, enter your API key.\n"
+            "Stored masked in ~/.zephyr/keys.json.\n"
+            "Providers: claude, gpt, grok, gemini",
+            True,
+        ),
+        (
+            "/keys list",
+            "/keys list",
+            "Show which providers are configured:\n"
+            "claude ✓  gpt ✓  grok ✗  gemini ✓",
+            True,
+        ),
+    ]
+
+    CALL_BUTTONS = [
+        (
+            "/call",
+            "/call ",
+            "Route your message to the best available external AI.\n"
+            "Passes context so the AI knows it's consulting for Zephyr/Prycat.\n"
+            "Usage: /call <message>",
+            False,
+        ),
+        (
+            "/call claude",
+            "/call claude ",
+            "Force Claude (claude-opus-4-5 via Anthropic).\nUsage: /call claude <message>",
+            False,
+        ),
+        (
+            "/call gpt",
+            "/call gpt ",
+            "Force GPT-4o via OpenAI.\nUsage: /call gpt <message>",
+            False,
+        ),
+        (
+            "/call grok",
+            "/call grok ",
+            "Force Grok-3 via xAI endpoint.\nUsage: /call grok <message>",
+            False,
+        ),
+        (
+            "/call gemini",
+            "/call gemini ",
+            "Force Gemini 2.0 Flash via Google.\nUsage: /call gemini <message>",
+            False,
+        ),
+    ]
+
+    TRAINING_BUTTONS = [
+        (
+            "/Run BlackLoRA-N",
+            "/run_lora",
+            "Run LoRA fine-tuning on completed Blackwell interview data.\n"
+            "(Requires 200+ training pairs — check /blackwell first.)",
+            True,
+        ),
+    ]
+
+    SESSION_BUTTONS = [
+        (
+            "/exit",
+            "/exit",
+            "Quit Zephyr.",
+            True,
+        ),
+    ]
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setMinimumWidth(200)
+        self.setMaximumWidth(300)
+        self.setStyleSheet("background-color: #090c10;")
+
+        scroll = QScrollArea(self)
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll.setStyleSheet("""
+            QScrollArea { border: none; background: transparent; }
+            QScrollBar:vertical {
+                background: #0d1117; width: 4px; border: none;
+            }
+            QScrollBar::handle:vertical {
+                background: #2a3a4a; border-radius: 2px; min-height: 16px;
+            }
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }
+        """)
+
+        inner = QWidget()
+        inner.setStyleSheet("background: transparent;")
+        vbox = QVBoxLayout(inner)
+        vbox.setContentsMargins(8, 8, 8, 8)
+        vbox.setSpacing(4)
+
+        hdr = QLabel("COMMAND PALETTE")
+        hdr.setStyleSheet("""
+            color: rgba(170,182,194,0.4);
+            font-family: Consolas, monospace;
+            font-size: 9px;
+            letter-spacing: 3px;
+            padding: 4px 4px 8px 4px;
+        """)
+        vbox.addWidget(hdr)
+
+        def add_group(buttons):
+            for label, cmd, tip, fire in buttons:
+                btn = ZephyrButton(label, cmd, tip, fire)
+                btn.clicked.connect(
+                    lambda checked=False, c=cmd, f=fire:
+                        self.command_requested.emit(c, f)
+                )
+                vbox.addWidget(btn)
+
+        add_group(self.BUTTONS)
+        vbox.addWidget(SectionDivider("Keys"))
+        add_group(self.KEYS_BUTTONS)
+        vbox.addWidget(SectionDivider("External AI"))
+        add_group(self.CALL_BUTTONS)
+        vbox.addWidget(SectionDivider("Training"))
+        add_group(self.TRAINING_BUTTONS)
+        vbox.addWidget(SectionDivider("Session"))
+        add_group(self.SESSION_BUTTONS)
+        vbox.addStretch()
+
+        scroll.setWidget(inner)
+
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.addWidget(scroll)
