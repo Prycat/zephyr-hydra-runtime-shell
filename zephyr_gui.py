@@ -7,6 +7,8 @@ Python 3.9 compatible.
 import sys
 import math
 import subprocess
+import queue
+import threading
 from typing import Optional
 
 from PySide6.QtCore import (
@@ -45,36 +47,79 @@ class ZephyrProcess(QThread):
     output_signal   = Signal(str)
     finished_signal = Signal()
 
+    _SENTINEL = object()   # signals the input queue to stop
+
     def __init__(self, parent=None):
         super().__init__(parent)
-        self._proc = None   # type: Optional[subprocess.Popen]
+        self._proc      = None      # type: Optional[subprocess.Popen]
+        self._lock      = threading.Lock()
+        self._input_q   = queue.Queue()   # GUI → worker thread
 
     def run(self):
-        self._proc = subprocess.Popen(
-            [sys.executable, AGENT_PATH],
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            bufsize=1,
-            encoding="utf-8",
-            errors="replace",
-        )
-        for line in self._proc.stdout:
-            self.output_signal.emit(line.rstrip("\n"))
-        self.finished_signal.emit()
+        try:
+            proc = subprocess.Popen(
+                [sys.executable, AGENT_PATH],
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                bufsize=1,
+                encoding="utf-8",
+                errors="replace",
+            )
+            with self._lock:
+                self._proc = proc
+
+            # Drain input queue in a separate writer thread so
+            # stdout reading never blocks on stdin writes.
+            def _stdin_writer():
+                while True:
+                    item = self._input_q.get()
+                    if item is self._SENTINEL:
+                        break
+                    try:
+                        proc.stdin.write(item + "\n")
+                        proc.stdin.flush()
+                    except OSError:
+                        break
+                try:
+                    proc.stdin.close()
+                except OSError:
+                    pass
+
+            writer = threading.Thread(target=_stdin_writer, daemon=True)
+            writer.start()
+
+            for line in proc.stdout:
+                self.output_signal.emit(line.rstrip("\n"))
+
+            self._input_q.put(self._SENTINEL)
+            writer.join(timeout=2)
+            proc.wait()
+
+        except Exception as exc:
+            self.output_signal.emit(f"[Zephyr GUI] Failed to start agent: {exc}")
+        finally:
+            with self._lock:
+                self._proc = None
+            self.finished_signal.emit()
 
     def send_input(self, text: str):
-        if self._proc and self._proc.stdin:
-            try:
-                self._proc.stdin.write(text + "\n")
-                self._proc.stdin.flush()
-            except OSError:
-                pass
+        """Thread-safe: called from GUI thread, queued to worker."""
+        self._input_q.put(text)
 
     def stop(self):
-        if self._proc:
+        with self._lock:
+            proc = self._proc
+        if proc:
             try:
-                self._proc.terminate()
+                proc.terminate()
+                proc.wait(timeout=3)
             except OSError:
                 pass
+            except subprocess.TimeoutExpired:
+                try:
+                    proc.kill()
+                except OSError:
+                    pass
+        self._input_q.put(self._SENTINEL)
