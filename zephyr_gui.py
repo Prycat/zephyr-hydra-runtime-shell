@@ -389,8 +389,6 @@ class ConsoleWidget(QPlainTextEdit):
                 self.verticalScrollBar().maximum()
             )
 
-        p.end()
-
 # ═══════════════════════════════════════════════════════════════
 #  InputBar
 # ═══════════════════════════════════════════════════════════════
