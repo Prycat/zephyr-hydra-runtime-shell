@@ -390,3 +390,80 @@ class ConsoleWidget(QPlainTextEdit):
             )
 
         p.end()
+
+# ═══════════════════════════════════════════════════════════════
+#  InputBar
+# ═══════════════════════════════════════════════════════════════
+class InputBar(QLineEdit):
+    """
+    Signals:
+        submitted(str) — emitted when user hits Enter or clicks Send
+    """
+    submitted = Signal(str)
+
+    HISTORY_MAX = 50
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._history     = []
+        self._history_idx = -1
+
+        font = QFont("Consolas", 10)
+        self.setFont(font)
+        self.setPlaceholderText("▶  type a message or /command...")
+        self.setStyleSheet("""
+            QLineEdit {
+                background-color: #0d1117;
+                color: rgba(128,221,202,0.92);
+                border: 1px solid rgba(255,255,255,0.08);
+                border-radius: 4px;
+                padding: 8px 12px;
+                selection-background-color: #1a3a40;
+            }
+            QLineEdit:focus {
+                border-color: rgba(128,221,202,0.38);
+            }
+        """)
+        self.returnPressed.connect(self._fire)
+
+    def _fire(self):
+        text = self.text().strip()
+        if not text:
+            return
+        if not self._history or self._history[-1] != text:
+            self._history.append(text)
+            if len(self._history) > self.HISTORY_MAX:
+                self._history.pop(0)
+        self._history_idx = -1
+        self.clear()
+        self.submitted.emit(text)
+
+    def inject(self, text: str, fire: bool = False):
+        """Pre-fill the input bar. If fire=True, submit immediately."""
+        self.setFocus()
+        self.setText(text)
+        self.setCursorPosition(len(text))
+        if fire:
+            self._fire()
+
+    def keyPressEvent(self, event):
+        if event.key() == Qt.Key.Key_Up:
+            if self._history:
+                if self._history_idx == -1:
+                    self._history_idx = len(self._history) - 1
+                elif self._history_idx > 0:
+                    self._history_idx -= 1
+                self.setText(self._history[self._history_idx])
+                self.setCursorPosition(len(self.text()))
+            return
+        if event.key() == Qt.Key.Key_Down:
+            if self._history_idx != -1:
+                if self._history_idx < len(self._history) - 1:
+                    self._history_idx += 1
+                    self.setText(self._history[self._history_idx])
+                else:
+                    self._history_idx = -1
+                    self.clear()
+                self.setCursorPosition(len(self.text()))
+            return
+        super().keyPressEvent(event)
