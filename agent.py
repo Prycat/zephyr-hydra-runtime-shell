@@ -1,22 +1,40 @@
 """
-Hermes 3 local tool-using agent via vLLM + TurboQuant.
-Uses vLLM's OpenAI-compatible API endpoint (localhost:8000).
-Run start_server.py before this script.
+Zephyr — Prycat Research Team
+Local AI agent via Ollama with an expanding tool suite and CLI commands.
 """
 
 import json
 import math
 import datetime
+import subprocess
+import tempfile
+import os
 import httpx
 from openai import OpenAI
 
-# vLLM exposes an OpenAI-compatible API on port 8000
+# Provider key vault
+try:
+    from zephyr_keys import KeyVault, call_provider, PROVIDERS, PROVIDER_PRIORITY
+    KEYS_AVAILABLE = True
+except ImportError:
+    KEYS_AVAILABLE = False
+
+# Blackwellian loop integration
+try:
+    from blackwell.logger import new_session, log_exchange, init_db
+    from blackwell.regret import average_payoff_vector, regret_vector, highest_regret_dims, print_status
+    from blackwell.planning import run_planning_session, get_world_model_context
+    LOGGING = True
+    init_db()
+except ImportError:
+    LOGGING = False
+
 client = OpenAI(
-    base_url="http://localhost:8000/v1",
-    api_key="unused",  # vLLM does not require an API key by default
+    base_url="http://localhost:11434/v1",
+    api_key="ollama",
 )
 
-MODEL = "NousResearch/Hermes-3-Llama-3.1-8B"
+MODEL = "hermes3:8b"
 
 # ─── Tool definitions ────────────────────────────────────────────────────────
 
@@ -29,10 +47,7 @@ TOOLS = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "expression": {
-                        "type": "string",
-                        "description": "The math expression to evaluate, e.g. '2 ** 10' or 'sqrt(144)'",
-                    }
+                    "expression": {"type": "string", "description": "Math expression to evaluate e.g. '2**10'"}
                 },
                 "required": ["expression"],
             },
@@ -43,11 +58,7 @@ TOOLS = [
         "function": {
             "name": "get_current_time",
             "description": "Returns the current date and time.",
-            "parameters": {
-                "type": "object",
-                "properties": {},
-                "required": [],
-            },
+            "parameters": {"type": "object", "properties": {}, "required": []},
         },
     },
     {
@@ -58,10 +69,7 @@ TOOLS = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "path": {
-                        "type": "string",
-                        "description": "Absolute or relative path to the file.",
-                    }
+                    "path": {"type": "string", "description": "Path to the file."}
                 },
                 "required": ["path"],
             },
@@ -75,38 +83,87 @@ TOOLS = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "path": {
-                        "type": "string",
-                        "description": "Path to write the file to.",
-                    },
-                    "content": {
-                        "type": "string",
-                        "description": "Text content to write.",
-                    },
+                    "path": {"type": "string", "description": "Path to write to."},
+                    "content": {"type": "string", "description": "Text to write."},
                 },
                 "required": ["path", "content"],
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "web_search",
+            "description": "Search the web using DuckDuckGo. Returns top results with titles, URLs, and snippets.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "The search query. Be specific — include dates or version numbers when relevant."},
+                    "max_results": {"type": "integer", "description": "Number of results (default 5, max 10)."},
+                },
+                "required": ["query"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "browse_url",
+            "description": "Fetch a URL and return its readable text content.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "url": {"type": "string", "description": "Full URL starting with http:// or https://"},
+                },
+                "required": ["url"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "run_python",
+            "description": "Execute a Python code snippet and return stdout/stderr. Use httpx for HTTP requests — never use requests.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "code": {"type": "string", "description": "Python code. Use print() for output. Use httpx not requests."},
+                },
+                "required": ["code"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "http_request",
+            "description": "Make a raw HTTP request to any API.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "method": {"type": "string", "description": "GET, POST, PUT, DELETE, PATCH"},
+                    "url": {"type": "string", "description": "Full URL."},
+                    "headers": {"type": "object", "description": "Optional headers."},
+                    "body": {"type": "string", "description": "Optional request body."},
+                },
+                "required": ["method", "url"],
+            },
+        },
+    },
 ]
-
 
 # ─── Tool implementations ────────────────────────────────────────────────────
 
 def calculate(expression: str) -> str:
-    # Safe math eval: expose only math module names
     safe_ns = {k: getattr(math, k) for k in dir(math) if not k.startswith("_")}
     safe_ns["__builtins__"] = {}
     try:
-        result = eval(expression, safe_ns)  # noqa: S307
-        return str(result)
+        return str(eval(expression, safe_ns))  # noqa: S307
     except Exception as e:
         return f"Error: {e}"
 
-
 def get_current_time() -> str:
     return datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
 
 def read_file(path: str) -> str:
     try:
@@ -115,30 +172,366 @@ def read_file(path: str) -> str:
     except Exception as e:
         return f"Error reading file: {e}"
 
-
 def write_file(path: str, content: str) -> str:
     try:
         with open(path, "w", encoding="utf-8") as f:
             f.write(content)
-        return f"File written successfully to {path}"
+        return f"Written to {path}"
     except Exception as e:
-        return f"Error writing file: {e}"
+        return f"Error: {e}"
 
+def web_search(query: str, max_results: int = 5) -> str:
+    try:
+        from ddgs import DDGS
+        max_results = min(max_results or 5, 10)
+        with DDGS() as ddgs:
+            results = list(ddgs.text(query, max_results=max_results))
+        if not results:
+            return "No results found."
+        lines = []
+        for i, r in enumerate(results, 1):
+            lines.append(f"{i}. {r.get('title', 'No title')}")
+            lines.append(f"   URL: {r.get('href', '')}")
+            lines.append(f"   {r.get('body', '')[:200]}")
+            lines.append("")
+        return "\n".join(lines)
+    except ImportError:
+        return "Error: ddgs not installed. Run: pip install ddgs"
+    except Exception as e:
+        return f"Search error: {e}"
+
+def browse_url(url: str) -> str:
+    try:
+        from bs4 import BeautifulSoup
+        if not url.startswith("http://") and not url.startswith("https://"):
+            return f"Error: URL must start with http:// or https://. Got: {url!r}"
+        headers = {"User-Agent": "Mozilla/5.0 (compatible; Zephyr-Agent/1.0)"}
+        resp = httpx.get(url, headers=headers, timeout=10, follow_redirects=True)
+        resp.raise_for_status()
+        soup = BeautifulSoup(resp.text, "html.parser")
+        for tag in soup(["script", "style", "nav", "footer", "header", "aside"]):
+            tag.decompose()
+        text = soup.get_text(separator="\n", strip=True)
+        lines = [l for l in text.splitlines() if l.strip()]
+        text = "\n".join(lines)
+        if len(text) > 3000:
+            text = text[:3000] + f"\n\n[truncated — {len(text)} chars total]"
+        return text
+    except ImportError:
+        return "Error: beautifulsoup4 not installed. Run: pip install beautifulsoup4"
+    except Exception as e:
+        return f"Browse error: {e}"
+
+def run_python(code: str) -> str:
+    try:
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False, encoding="utf-8") as f:
+            f.write(code)
+            tmp_path = f.name
+        result = subprocess.run(["python", tmp_path], capture_output=True, text=True, timeout=10)
+        os.unlink(tmp_path)
+        output = result.stdout
+        if result.stderr:
+            output += f"\nSTDERR:\n{result.stderr}"
+        return output.strip() or "(no output)"
+    except subprocess.TimeoutExpired:
+        return "Error: timed out after 10 seconds."
+    except Exception as e:
+        return f"Error: {e}"
+
+def http_request(method: str, url: str, headers: dict = None, body: str = None) -> str:
+    try:
+        kwargs = {"timeout": 15, "follow_redirects": True}
+        if headers:
+            kwargs["headers"] = headers
+        if body:
+            kwargs["content"] = body
+        resp = httpx.request(method.upper(), url, **kwargs)
+        try:
+            body_text = json.dumps(resp.json(), indent=2)[:2000]
+        except Exception:
+            body_text = resp.text[:2000]
+        return f"Status: {resp.status_code}\n\n{body_text}"
+    except Exception as e:
+        return f"HTTP error: {e}"
 
 TOOL_HANDLERS = {
-    "calculate": lambda args: calculate(**args),
+    "calculate":        lambda args: calculate(**args),
     "get_current_time": lambda args: get_current_time(),
-    "read_file": lambda args: read_file(**args),
-    "write_file": lambda args: write_file(**args),
+    "read_file":        lambda args: read_file(**args),
+    "write_file":       lambda args: write_file(**args),
+    "web_search":       lambda args: web_search(**args),
+    "browse_url":       lambda args: browse_url(**args),
+    "run_python":       lambda args: run_python(**args),
+    "http_request":     lambda args: http_request(**args),
 }
 
+# ─── System prompt ────────────────────────────────────────────────────────────
+
+SYSTEM_PROMPT = """You are Zephyr, a sharp AI research assistant and member of the Prycat research team.
+
+IDENTITY
+- Your name is Zephyr. Always introduce yourself as Zephyr.
+- You run locally via Ollama on the user's machine.
+
+TOOLS AVAILABLE
+- calculate        — math expressions
+- get_current_time — current date/time
+- read_file        — read a local file
+- write_file       — write a local file
+- web_search       — DuckDuckGo search (be specific: include dates, versions, names)
+- browse_url       — fetch any webpage (pass the EXACT url given, never modify it)
+- run_python       — run Python code (use httpx for HTTP — NEVER use requests)
+- http_request     — raw HTTP call to any API
+
+TOOL CALL RULES — follow these precisely
+1. When you decide to use a tool, call it immediately. Never paste JSON or XML tool syntax into your reply.
+2. For browse_url: use the exact URL provided by the user. Do not guess or alter it.
+3. For run_python: always import httpx, never import requests.
+4. For web_search: make your query specific. Add the current year or topic keywords. Never search generic terms.
+5. After getting a tool result, summarise it concisely — don't repeat the raw output verbatim.
+
+RESPONSE RULES
+- Be concise. One paragraph max unless detail is explicitly requested.
+- If you don't know something, say "I don't know" in one sentence — don't pad.
+- Never say "I'm just an AI" or give disclaimers. Just answer.
+- Never leak raw tool call syntax, JSON brackets, or XML tags into your replies.
+
+EXAMPLE — correct tool use:
+User: "what's the weather at https://wttr.in/?format=3"
+You think: I should call browse_url with url="https://wttr.in/?format=3"
+[call browse_url] → get result → summarise in one line."""
+
+# ─── CLI command handler ──────────────────────────────────────────────────────
+
+CLI_COMMANDS = {
+    "/help":      "Show this help message",
+    "/tools":     "List all of Zephyr's tools",
+    "/search":    "Direct web search — /search <query>",
+    "/browse":    "Fetch a URL directly — /browse <url>",
+    "/run":       "Run Python code directly — /run <code>",
+    "/status":    "Check Ollama connection",
+    "/model":     "Show current model info",
+    "/save":      "Save conversation to Obsidian vault — /save [filename]",
+    "/clear":     "Clear conversation history",
+    "/blackwell": "Enter Zephyr's planning space — he asks, you answer, he grows",
+    "/keys":      "Manage API keys — /keys setup | list | clear <provider>",
+    "/call":      "Consult an external AI — /call [claude|gpt|grok|gemini] <message>",
+    "/exit":      "Exit Zephyr",
+}
+
+def handle_cli(cmd: str, history: list[dict]) -> tuple[bool, list[dict]]:
+    """
+    Handle a /command. Returns (should_continue, updated_history).
+    Returns (False, history) to signal exit.
+    """
+    parts = cmd.strip().split(" ", 1)
+    command = parts[0].lower()
+    arg = parts[1].strip() if len(parts) > 1 else ""
+
+    if command in ("/help", "/?"):
+        print("\nZephyr CLI Commands:")
+        for c, desc in CLI_COMMANDS.items():
+            print(f"  {c:<10} {desc}")
+        print()
+
+    elif command == "/tools":
+        print("\nZephyr's Tools:")
+        tool_info = [
+            ("calculate",        "Evaluate math expressions"),
+            ("get_current_time", "Get current date and time"),
+            ("read_file",        "Read a local file"),
+            ("write_file",       "Write a local file"),
+            ("web_search",       "Search the web with DuckDuckGo"),
+            ("browse_url",       "Fetch and read any webpage"),
+            ("run_python",       "Execute Python code snippets"),
+            ("http_request",     "Make raw HTTP API calls"),
+        ]
+        for name, desc in tool_info:
+            print(f"  {name:<20} {desc}")
+        print()
+
+    elif command == "/search":
+        if not arg:
+            print("Usage: /search <query>\n")
+        else:
+            print(f"Searching: {arg}")
+            print(web_search(arg))
+
+    elif command == "/browse":
+        if not arg:
+            print("Usage: /browse <url>\n")
+        else:
+            print(f"Fetching: {arg}\n")
+            print(browse_url(arg))
+
+    elif command == "/run":
+        if not arg:
+            print("Usage: /run <python code>\n")
+        else:
+            print(run_python(arg))
+
+    elif command == "/status":
+        try:
+            resp = httpx.get("http://localhost:11434/api/tags", timeout=5)
+            resp.raise_for_status()
+            data = resp.json()
+            models = [m["name"] for m in data.get("models", [])]
+            print(f"\nOllama: Online")
+            print(f"Models: {', '.join(models)}")
+            print(f"Active: {MODEL}\n")
+        except Exception as e:
+            print(f"\nOllama: Offline ({e})\n")
+
+    elif command == "/model":
+        print(f"\nModel : {MODEL}")
+        print(f"API   : http://localhost:11434/v1")
+        print(f"Team  : Prycat Research\n")
+
+    elif command == "/save":
+        vault_dir = r"C:\Users\gamer23\Desktop\vault 1\all zephyr conversations"
+        timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H-%M-%S")
+        base_name = arg if arg else f"Zephyr {timestamp}"
+        # Ensure .md extension
+        if not base_name.endswith(".md"):
+            base_name += ".md"
+        try:
+            os.makedirs(vault_dir, exist_ok=True)
+            filepath = os.path.join(vault_dir, base_name)
+            with open(filepath, "w", encoding="utf-8") as f:
+                # Obsidian frontmatter
+                f.write(f"---\n")
+                f.write(f"date: {datetime.datetime.now().strftime('%Y-%m-%d')}\n")
+                f.write(f"time: {datetime.datetime.now().strftime('%H:%M:%S')}\n")
+                f.write(f"model: {MODEL}\n")
+                f.write(f"tags: [zephyr, conversation]\n")
+                f.write(f"---\n\n")
+                f.write(f"# Zephyr — {timestamp}\n\n")
+                # Write each message
+                for msg in history:
+                    role = msg.get("role", "?")
+                    content = msg.get("content", "")
+                    if not content or role == "system":
+                        continue
+                    if role == "user":
+                        f.write(f"**You:** {content}\n\n")
+                    elif role == "assistant":
+                        f.write(f"**Zephyr:** {content}\n\n")
+                        f.write("---\n\n")
+            print(f"Saved to Obsidian vault:\n  {filepath}\n")
+        except Exception as e:
+            print(f"Error saving: {e}\n")
+
+    elif command == "/clear":
+        history = [{"role": "system", "content": SYSTEM_PROMPT}]
+        print("History cleared.\n")
+
+    elif command == "/keys":
+        if not KEYS_AVAILABLE:
+            print("Key vault not available. Check zephyr_keys.py.\n")
+        else:
+            vault = KeyVault()
+            sub = arg.split()[0].lower() if arg else "list"
+            if sub == "setup":
+                # Optional: setup a specific provider
+                specific = arg.split()[1].lower() if len(arg.split()) > 1 else None
+                vault.setup(provider=specific)
+            elif sub == "list":
+                vault.print_status()
+            elif sub == "clear":
+                provider = arg.split()[1].lower() if len(arg.split()) > 1 else None
+                if not provider:
+                    print("Usage: /keys clear <provider>\n")
+                else:
+                    vault.remove(provider)
+                    print(f"Removed key for '{provider}'.\n")
+            else:
+                print("Usage: /keys setup | list | clear <provider>\n")
+
+    elif command == "/call":
+        if not KEYS_AVAILABLE:
+            print("Key vault not available. Check zephyr_keys.py.\n")
+        elif not arg:
+            print("Usage: /call <message>  or  /call <provider> <message>")
+            print("Providers: claude, gpt, grok, gemini  (or leave blank for best available)\n")
+        else:
+            # Parse: /call claude <message>  or  /call <message>
+            words = arg.split(None, 1)
+            known = {"claude", "gpt", "grok", "gemini", "codex", "openai", "google", "auto"}
+            if words[0].lower() in known:
+                provider = words[0].lower()
+                message  = words[1] if len(words) > 1 else ""
+            else:
+                provider = "auto"
+                message  = arg
+
+            if not message:
+                print("Please include a message. E.g. /call claude explain this code\n")
+            else:
+                print(f"\n  Calling {provider if provider != 'auto' else 'best available'}...\n")
+                used, response = call_provider(provider, message, history)
+                label = used.upper()
+                print(f"  [{label}]: {response}\n")
+
+                # Save to Obsidian vault automatically
+                vault_dir  = r"C:\Users\gamer23\Desktop\vault 1\all zephyr conversations"
+                timestamp  = datetime.datetime.now().strftime("%Y-%m-%d %H-%M-%S")
+                safe_msg   = message[:40].replace("/", "-").replace("\\", "-").replace(":", "-")
+                md_name    = f"Call - {used} - {timestamp}.md"
+                try:
+                    os.makedirs(vault_dir, exist_ok=True)
+                    filepath = os.path.join(vault_dir, md_name)
+                    with open(filepath, "w", encoding="utf-8") as f:
+                        f.write(f"---\n")
+                        f.write(f"date: {datetime.datetime.now().strftime('%Y-%m-%d')}\n")
+                        f.write(f"time: {datetime.datetime.now().strftime('%H:%M:%S')}\n")
+                        f.write(f"provider: {used}\n")
+                        f.write(f"tags: [zephyr, call, {used}]\n")
+                        f.write(f"---\n\n")
+                        f.write(f"# Call → {label}\n\n")
+                        f.write(f"## Question\n\n{message}\n\n")
+                        f.write(f"## Response\n\n{response}\n")
+                    print(f"  Saved to vault: {md_name}\n")
+                except Exception as e:
+                    print(f"  (Vault save failed: {e})\n")
+
+                # Inject into history so Zephyr can reference it
+                history.append({
+                    "role": "assistant",
+                    "content": f"[Consulted {label}]: {response}"
+                })
+
+    elif command == "/blackwell":
+        if not LOGGING:
+            print("Blackwell module not available. Check blackwell/ directory.\n")
+        else:
+            avg_v   = average_payoff_vector()
+            r       = regret_vector(avg_v)
+            targets = highest_regret_dims(r, top_n=2)
+            print_status(avg_v)
+            run_planning_session(r, targets)
+            # After session, rebuild system prompt with updated world model
+            wm_context = get_world_model_context()
+            if wm_context:
+                updated_prompt = SYSTEM_PROMPT + f"\n\nWORLD MODEL (built from planning sessions):\n{wm_context}"
+                # Update system message in history
+                if history and history[0]["role"] == "system":
+                    history[0]["content"] = updated_prompt
+                print("  Zephyr's world model injected into context.\n")
+
+    elif command in ("/exit", "/quit"):
+        print("Bye!")
+        return False, history
+
+    else:
+        print(f"Unknown command: {command}. Type /help for a list.\n")
+
+    return True, history
 
 # ─── Agent loop ──────────────────────────────────────────────────────────────
 
-def run_agent(user_message: str, history: list[dict]) -> tuple[str, list[dict]]:
-    """Run one turn of the agent. Returns (final_reply, updated_history)."""
+def run_agent(user_message: str, history: list[dict],
+              tools_called: list = None) -> tuple[str, list[dict]]:
     history = history + [{"role": "user", "content": user_message}]
-
     while True:
         response = client.chat.completions.create(
             model=MODEL,
@@ -146,55 +539,51 @@ def run_agent(user_message: str, history: list[dict]) -> tuple[str, list[dict]]:
             tools=TOOLS,
             tool_choice="auto",
         )
-
         msg = response.choices[0].message
         history.append(msg.model_dump(exclude_unset=True))
-
-        # If no tool calls, we have the final answer
         if not msg.tool_calls:
             return msg.content, history
-
-        # Execute each tool call
         for call in msg.tool_calls:
             fn_name = call.function.name
             fn_args = json.loads(call.function.arguments)
             print(f"  [tool] {fn_name}({fn_args})")
-
+            if tools_called is not None:
+                tools_called.append(fn_name)
             handler = TOOL_HANDLERS.get(fn_name)
-            if handler:
-                result = handler(fn_args)
-            else:
-                result = f"Unknown tool: {fn_name}"
-
+            result = handler(fn_args) if handler else f"Unknown tool: {fn_name}"
             history.append({
                 "role": "tool",
                 "tool_call_id": call.id,
                 "content": str(result),
             })
 
-
-# ─── Main chat loop ──────────────────────────────────────────────────────────
-
-SYSTEM_PROMPT = """You are Hermes, a helpful and capable AI assistant running locally via vLLM with TurboQuant KV cache compression.
-You have access to tools: calculate, get_current_time, read_file, write_file.
-Use tools whenever they would give a more accurate or useful answer.
-Be concise and direct."""
-
+# ─── Main ────────────────────────────────────────────────────────────────────
 
 def main():
-    print("Hermes 3 Agent (local via vLLM + TurboQuant)")
-    print("Type 'exit' or 'quit' to stop, 'clear' to reset history.\n")
-
-    # Verify vLLM server is reachable before entering the chat loop
+    # ── Startup splash ────────────────────────────────────────
     try:
-        response = httpx.get("http://localhost:8000/health", timeout=3)
-        response.raise_for_status()
-    except (httpx.ConnectError, httpx.TimeoutException, httpx.HTTPStatusError):
-        print("ERROR: vLLM server not reachable on port 8000.")
-        print("Start it first with:  python start_server.py\n")
+        from dragon_splash import show_splash
+        show_splash()
+    except Exception:
+        # Fallback if splash fails (e.g. no ANSI support)
+        print("Zephyr — Prycat Research Team (local via Ollama)\n")
+
+    print("Type /help for commands, /exit to quit.\n")
+
+    try:
+        httpx.get("http://localhost:11434/api/tags", timeout=5).raise_for_status()
+    except Exception:
+        print("ERROR: Ollama is not running. Start it from your system tray.\n")
+        input("Press Enter to exit...")
         return
 
     history = [{"role": "system", "content": SYSTEM_PROMPT}]
+
+    # Start a logging session
+    session_id = None
+    turn = 0
+    if LOGGING:
+        session_id = new_session(MODEL)
 
     while True:
         try:
@@ -205,20 +594,25 @@ def main():
 
         if not user_input:
             continue
-        if user_input.lower() in ("exit", "quit"):
-            print("Bye!")
-            break
-        if user_input.lower() == "clear":
-            history = [{"role": "system", "content": SYSTEM_PROMPT}]
-            print("History cleared.\n")
+
+        # Handle CLI commands
+        if user_input.startswith("/"):
+            should_continue, history = handle_cli(user_input, history)
+            if not should_continue:
+                break
             continue
 
+        # Regular chat
         try:
-            reply, history = run_agent(user_input, history)
-            print(f"\nHermes: {reply}\n")
+            tools_called = []
+            reply, history = run_agent(user_input, history, tools_called)
+            print(f"\nZephyr: {reply}\n")
+            # Log to Blackwell DB
+            if LOGGING and session_id:
+                turn += 1
+                log_exchange(session_id, turn, user_input, reply, tools_called)
         except Exception as e:
             print(f"Error: {e}\n")
-
 
 if __name__ == "__main__":
     main()
