@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """
 zephyr_gui.py — Zephyr Command Workbench
 Prycat Research Team
