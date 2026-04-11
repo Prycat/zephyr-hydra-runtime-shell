@@ -179,6 +179,11 @@ class ZephyrButton(QPushButton):
         self.setFlat(True)
         self.setAttribute(Qt.WidgetAttribute.WA_Hover, True)
 
+        # Cache font to avoid allocation every paintEvent frame
+        self._font = QFont("Consolas", 9)
+        self._font.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, 1.5)
+        self._font.setBold(True)
+
     def set_state(self, state: str):
         """state: idle | running | success | error"""
         self._state = state
@@ -210,7 +215,7 @@ class ZephyrButton(QPushButton):
         super().leaveEvent(event)
 
     def mouseMoveEvent(self, event):
-        self._mouse_pos = QPointF(event.position())
+        self._mouse_pos = event.position()
         super().mouseMoveEvent(event)
 
     def paintEvent(self, event):
@@ -271,7 +276,7 @@ class ZephyrButton(QPushButton):
 
         # 8. State tint
         if self._state_tint_a > 0 and self._state in ("success", "error"):
-            tint_color = C_GREEN if self._state == "success" else C_AMBER
+            tint_color = C_GREEN if self._state == "success" else C_RED
             tint = QColor(tint_color)
             tint.setAlpha(int(40 * self._state_tint_a))
             p.setBrush(QBrush(tint))
@@ -279,10 +284,7 @@ class ZephyrButton(QPushButton):
             p.drawRoundedRect(rect, 4, 4)
 
         # 9. Label text
-        font = QFont("Consolas", 9)
-        font.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, 1.5)
-        font.setBold(True)
-        p.setFont(font)
+        p.setFont(self._font)
         text_color = QColor(C_TEAL) if self._mouse_inside else QColor(C_TEAL_DIM)
         p.setPen(QPen(text_color))
         text_rect = QRectF(12, 0, w - 30, h)
