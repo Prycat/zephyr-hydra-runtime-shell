@@ -13,6 +13,7 @@ import textwrap
 import subprocess
 import queue
 import threading
+import time
 from collections import deque
 from typing import Optional
 
@@ -222,19 +223,18 @@ class ZephyrProcess(QThread):
             writer = threading.Thread(target=_stdin_writer, daemon=True)
             writer.start()
 
-            import time as _time
             last_tok_t = None
 
             for line in proc.stdout:
                 stripped = line.rstrip("\n")
                 if stripped == "<<ZS>>":
-                    last_tok_t = _time.monotonic()
+                    last_tok_t = time.monotonic()
                     self.stream_started.emit()
                 elif stripped == "<<ZE>>":
                     last_tok_t = None
                     self.stream_ended.emit()
                 elif stripped.startswith("\x01"):
-                    now = _time.monotonic()
+                    now = time.monotonic()
                     if last_tok_t is not None:
                         gap_ms = (now - last_tok_t) * 1000.0
                         # First emission after <<ZS>> is time-to-first-token (TTFT);
@@ -737,7 +737,7 @@ class ThinkingBar(QWidget):
                     h = raw_v
                 else:
                     # Wider smoothing kernel for deeper Z lanes:
-                    # iz=1 → kernel=4 (half=2), iz=2 → kernel=7 (half=3)
+                    # iz=1 → half=2 → 5 samples; iz=2 → half=3 → 7 samples
                     half    = 1 + iz
                     centre  = int(t * (N - 1))
                     samples = [gaps[max(0, min(N - 1, centre + off))]
@@ -1553,8 +1553,14 @@ class MainWindow(QMainWindow):
         self._process = ZephyrProcess(self)
         self._process.output_signal.connect(self._console.append_line)
         self._process.finished_signal.connect(self._on_agent_exit)
-        self._process.stream_started.connect(self._thinking_bar.start)
-        self._process.stream_ended.connect(self._thinking_bar.stop)
+        self._process.stream_started.connect(
+            self._thinking_bar.start,
+            Qt.ConnectionType.QueuedConnection,
+        )
+        self._process.stream_ended.connect(
+            self._thinking_bar.stop,
+            Qt.ConnectionType.QueuedConnection,
+        )
         self._process.token_gap.connect(
             self._thinking_bar.record_token_gap,
             Qt.ConnectionType.QueuedConnection,
@@ -1577,6 +1583,7 @@ class MainWindow(QMainWindow):
 
     def _on_agent_exit(self):
         self._console.append_line("─── Zephyr process ended ───")
+        self._thinking_bar.stop()   # clear LOADING/THINKING if process died mid-stream
 
     def closeEvent(self, event):
         self._process.stop()
