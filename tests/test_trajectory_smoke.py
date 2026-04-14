@@ -65,3 +65,36 @@ def test_full_smoke_five_turns(tmp_path, monkeypatch):
     assert sample["conversations"][0]["from"] == "human"
     assert sample["conversations"][1]["from"] == "gpt"
     assert sample["source"] == "trajectory"
+
+
+from unittest.mock import patch, MagicMock
+
+
+def test_evaluator_scores_and_writes_to_db():
+    """Evaluator processes queue item and calls update_scores."""
+    fake_scores = {
+        "accuracy": 0.8, "logic": 0.9, "tone": 0.7,
+        "curiosity": 0.6, "safety": 1.0, "notes": "good"
+    }
+    with patch("blackwell.background_eval.evaluate_exchange",
+               return_value=fake_scores) as mock_eval, \
+         patch("blackwell.background_eval.update_scores") as mock_update, \
+         patch("blackwell.background_eval._maybe_trigger_oracle"):
+        from blackwell.background_eval import BackgroundEvaluator
+        ev = BackgroundEvaluator(regret_threshold=0.15)
+        ev.submit("ex-id-1", "what is pi?", "3.14159")
+        ev._worker_step()
+        mock_eval.assert_called_once_with("what is pi?", "3.14159")
+        mock_update.assert_called_once_with("ex-id-1", fake_scores)
+
+
+def test_evaluator_does_not_crash_on_error():
+    """Evaluator swallows exceptions from evaluate_exchange."""
+    with patch("blackwell.background_eval.evaluate_exchange",
+               side_effect=Exception("ollama down")), \
+         patch("blackwell.background_eval.update_scores") as mock_update:
+        from blackwell.background_eval import BackgroundEvaluator
+        ev = BackgroundEvaluator()
+        ev.submit("ex-id-2", "hello", "hi")
+        ev._worker_step()  # should not raise
+        mock_update.assert_not_called()
