@@ -31,12 +31,11 @@ CURATED: dict[str, dict[str, str]] = {
         "list_dir"                  : "code_list_dir",
     },
     "ruflo": {
-        # TODO (Task 3): replace with exact names from `npx ruflo@latest mcp start` tools/list
-        "execute_task"      : "agent_task",
-        "web_search"        : "agent_search",
-        "analyze_content"   : "agent_analyze",
-        "generate_content"  : "agent_generate",
-        "get_task_status"   : "agent_status",
+        "agent_spawn"       : "agent_task",
+        "browser_open"      : "agent_search",
+        "analyze_diff"      : "agent_analyze",
+        "wasm_agent_prompt" : "agent_generate",
+        "agent_status"      : "agent_status",
     },
 }
 
