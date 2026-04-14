@@ -445,9 +445,9 @@ def handle_cli(cmd: str, history: list[dict]) -> tuple[bool, list[dict]]:
             print(f"\nOllama: Offline ({e})\n")
 
     elif command == "/model":
+        global MODEL, client
         model_name = arg.strip()
         if model_name:
-            global MODEL, client
             MODEL = model_name
             client = OpenAI(base_url="http://localhost:11434/v1", api_key="ollama")
             print(f"[MODEL] switched to {MODEL}")

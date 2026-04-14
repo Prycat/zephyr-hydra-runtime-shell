@@ -135,6 +135,8 @@ class ModelSwitcherCard(QWidget):
         self.move(pos)
         self.show()
         self.raise_()
+        self.setFocus()
+        self.activateWindow()
         # Recreate thread each time — QThread.start() is no-op after thread finishes
         self._fetch_thread = OllamaFetchThread()
         self._fetch_thread.models_ready.connect(self._on_models_ready)
