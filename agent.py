@@ -649,6 +649,23 @@ def handle_cli(cmd: str, history: list[dict]) -> tuple[bool, list[dict]]:
                     history[0]["content"] = updated_prompt
                 print("  Coding world model injected into context.\n")
 
+    elif command == "/run_lora":
+        print("[BlackLoRA] Checking training data...\n", flush=True)
+        try:
+            from blackwell.lora_steer import run_lora_cycle, check_training_data
+            ok, msg = check_training_data()
+            if not ok:
+                print(f"[BlackLoRA] Not enough data: {msg}\n")
+            else:
+                gguf_dir = run_lora_cycle()
+                if gguf_dir:
+                    from blackwell.export import register_with_ollama
+                    register_with_ollama(gguf_dir)
+                else:
+                    print("[BlackLoRA] Training complete. GGUF export was skipped.\n")
+        except Exception as e:
+            print(f"[BlackLoRA] Error: {e}\n")
+
     elif command in ("/exit", "/quit"):
         print("Bye!")
         return False, history

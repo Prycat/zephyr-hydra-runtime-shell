@@ -18,6 +18,7 @@ import sys
 import os
 import json
 import argparse
+from typing import Optional
 
 TRAINING_PATH  = os.path.join(os.path.dirname(__file__), "training_pairs.jsonl")
 ADAPTER_PATH   = os.path.join(os.path.dirname(__file__), "adapters", "latest")
@@ -85,10 +86,17 @@ def load_training_data():
     return dataset.map(format_row)
 
 
-def run_lora_steer(steps: int = MAX_STEPS):
-    """Run one LoRA steering cycle."""
+def run_lora_steer(steps: int = MAX_STEPS) -> Optional[str]:
+    """Run one LoRA steering cycle.
+
+    Returns
+    -------
+    str | None
+        Path to the GGUF directory on success, None if export was skipped or
+        training could not start.
+    """
     if not check_dependencies():
-        return
+        return None
 
     from unsloth import FastLanguageModel
     from trl import SFTTrainer
@@ -155,16 +163,40 @@ def run_lora_steer(steps: int = MAX_STEPS):
     model.save_pretrained(ADAPTER_PATH)
     tokenizer.save_pretrained(ADAPTER_PATH)
     print(f"\nAdapter saved to: {ADAPTER_PATH}")
-    print("Next: merge adapter and push to Ollama (see docs/plans/)")
-    print()
+
+    # Export merged model to GGUF for Ollama
+    print("[BlackLoRA] Exporting to GGUF (Q4_K_M) — this takes a few minutes...", flush=True)
+    gguf_dir = os.path.join(os.path.dirname(ADAPTER_PATH), "gguf")
+    try:
+        model.save_pretrained_gguf(
+            gguf_dir,
+            tokenizer,
+            quantization_method="q4_k_m",
+        )
+        print(f"[BlackLoRA] GGUF saved to {gguf_dir}", flush=True)
+        return gguf_dir
+    except Exception as e:
+        print(f"[BlackLoRA] GGUF export failed: {e}", flush=True)
+        print("[BlackLoRA] Adapter saved but GGUF skipped. Run export manually.", flush=True)
+        return None
 
 
-def check_training_data():
-    """Report on what's in the training data."""
+# Canonical alias used by agent.py and export pipeline
+run_lora_cycle = run_lora_steer
+
+
+def check_training_data() -> tuple:
+    """Report on what's in the training data.
+
+    Returns
+    -------
+    (ok: bool, message: str)
+        ok is True when there are enough pairs to train (>=200).
+    """
     if not os.path.exists(TRAINING_PATH):
-        print(f"No training data yet at {TRAINING_PATH}")
-        print("Run: python run_oracle.py")
-        return
+        msg = f"No training data yet at {TRAINING_PATH}. Run: python run_oracle.py"
+        print(msg)
+        return False, msg
 
     records = []
     dim_counts = {}
@@ -193,12 +225,17 @@ def check_training_data():
 
     rec_needed = 200 - len(records)
     if rec_needed > 0:
-        print(f"\nRecommend {rec_needed} more pairs before LoRA training.")
+        msg = f"Only {len(records)} pairs — need {rec_needed} more before LoRA training."
+        print(f"\n{msg}")
         print("Run run_oracle.py a few more times to build the dataset.")
+        print()
+        return False, msg
     else:
-        print(f"\n{len(records)} pairs — ready for LoRA training.")
+        msg = f"{len(records)} pairs — ready for LoRA training."
+        print(f"\n{msg}")
         print("Run: python blackwell/lora_steer.py")
-    print()
+        print()
+        return True, msg
 
 
 if __name__ == "__main__":
