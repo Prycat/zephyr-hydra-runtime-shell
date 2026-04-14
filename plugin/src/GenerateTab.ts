@@ -1,7 +1,7 @@
 import { App, Notice, TFile } from 'obsidian';
 
-const VLLM_URL = 'http://localhost:8000/v1/chat/completions';
-const MODEL    = 'NousResearch/Hermes-3-Llama-3.1-8B';
+const OLLAMA_URL = 'http://localhost:11434/v1/chat/completions';
+const MODEL      = 'hermes3:8b';
 const WIKI_DIR = 'Wiki';
 
 function sanitizeName(name: string): string {
@@ -56,9 +56,9 @@ export class GenerateTab {
   }
 
   private async generateArticle(topic: string): Promise<string> {
-    const res = await fetch(VLLM_URL, {
+    const res = await fetch(OLLAMA_URL, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer unused' },
+      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ollama' },
       body: JSON.stringify({
         model: MODEL,
         messages: [{
@@ -70,7 +70,7 @@ export class GenerateTab {
       }),
       signal: AbortSignal.timeout(60_000),
     });
-    if (!res.ok) throw new Error(`vLLM returned ${res.status}`);
+    if (!res.ok) throw new Error(`Ollama returned ${res.status}`);
     const json = await res.json();
     return (json.choices[0].message.content as string);
   }

@@ -100,6 +100,25 @@ class McpServer:
             )
             # Allow slow starters (npx, uvx) to warm up; first cold-start may download packages
             time.sleep(_WARMUP.get(self.key, 2.0))
+
+            # ── Liveness check ────────────────────────────────────────────────
+            # On Windows, writing to a pipe whose subprocess has already exited
+            # raises [Errno 22] Invalid argument.  Detect early exit here and
+            # capture stderr so the developer sees WHY the process died.
+            rc = self._proc.poll()
+            if rc is not None:
+                try:
+                    stderr_out = self._proc.stderr.read(2000).strip()
+                except Exception:
+                    stderr_out = ""
+                msg = f"[tools_mcp] {self.key}: process exited during warmup (rc={rc})"
+                if stderr_out:
+                    msg += f"\n  stderr → {stderr_out}"
+                print(msg, file=sys.stderr)
+                self._proc = None
+                return False
+            # ─────────────────────────────────────────────────────────────────
+
             # Send initialize handshake
             self._send({
                 "method": "initialize",

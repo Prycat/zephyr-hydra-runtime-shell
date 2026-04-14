@@ -273,9 +273,15 @@ TOOL_HANDLERS = {
     "http_request":     lambda args: http_request(**args),
 }
 
-# ─── MCP skill registration ───────────────────────────────────────────────────
+# ─── MCP skill registration (background — don't block startup) ───────────────
 if MCP_AVAILABLE:
-    tools_mcp.register_mcp_tools(TOOLS, TOOL_HANDLERS)
+    import threading as _mcp_thread
+    _mcp_thread.Thread(
+        target=tools_mcp.register_mcp_tools,
+        args=(TOOLS, TOOL_HANDLERS),
+        daemon=True,
+        name="mcp-init",
+    ).start()
 
 # ─── System prompt ────────────────────────────────────────────────────────────
 
@@ -623,7 +629,7 @@ def run_agent(user_message: str, history: list[dict],
         response = client.chat.completions.create(
             model=MODEL,
             messages=history,
-            tools=TOOLS,
+            tools=list(TOOLS),  # snapshot so background MCP init can't mutate mid-call
             tool_choice="auto",
             stream=True,
         )
@@ -783,7 +789,8 @@ def main():
                 turn += 1
                 log_exchange(session_id, turn, user_input, reply, tools_called)
         except Exception as e:
-            print(f"Error: {e}\n")
+            print(f"Error: {e}\n", flush=True)
+            print("<<ZE>>", flush=True)  # clear GUI loading state
 
 if __name__ == "__main__":
     main()

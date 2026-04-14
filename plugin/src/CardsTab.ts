@@ -1,7 +1,7 @@
 import { App, Notice, TFile } from 'obsidian';
 
-const VLLM_URL  = 'http://localhost:8000/v1/chat/completions';
-const MODEL     = 'NousResearch/Hermes-3-Llama-3.1-8B';
+const OLLAMA_URL = 'http://localhost:11434/v1/chat/completions';
+const MODEL      = 'hermes3:8b';
 const WIKI_DIR  = 'Wiki';
 const CARDS_DIR = 'Flashcards';
 
@@ -57,9 +57,9 @@ export class CardsTab {
     try {
       const content = await this.app.vault.read(file);
       const body = content.replace(/^---[\s\S]*?---\n/, '');
-      const res = await fetch(VLLM_URL, {
+      const res = await fetch(OLLAMA_URL, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer unused' },
+        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ollama' },
         body: JSON.stringify({
           model: MODEL,
           messages: [{
@@ -71,7 +71,7 @@ export class CardsTab {
         }),
         signal: AbortSignal.timeout(45_000),
       });
-      if (!res.ok) throw new Error(`vLLM ${res.status}`);
+      if (!res.ok) throw new Error(`Ollama ${res.status}`);
       const json = await res.json();
       const cards = json.choices[0].message.content as string;
       await this.saveCards(file.basename, cards);
