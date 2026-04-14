@@ -8,12 +8,13 @@ import subprocess
 import sys
 import threading
 import time
+from typing import Dict, List, Optional
 
 # ── Curated tool sets ────────────────────────────────────────────────────────
 # Map: server_key → {mcp_tool_name: hermes_tool_name}
 # All names confirmed from live manifests: MemPalace/Serena (Task 1), Ruflo (Task 3, claude-flow v3.0.0).
 
-CURATED: dict[str, dict[str, str]] = {
+CURATED: Dict[str, Dict[str, str]] = {
     "mempalace": {
         "mempalace_add_drawer"    : "memory_store",
         "mempalace_search"        : "memory_search",
@@ -40,7 +41,7 @@ CURATED: dict[str, dict[str, str]] = {
 
 # ── Server launch commands ───────────────────────────────────────────────────
 
-SERVER_CMDS: dict[str, list[str]] = {
+SERVER_CMDS: Dict[str, List[str]] = {
     "mempalace": [sys.executable, "-m", "mempalace.mcp_server"],
     "serena":    ["uvx", "--from", "git+https://github.com/oraios/serena",
                   "serena", "start-mcp-server"],
@@ -57,7 +58,7 @@ class McpServer:
     def __init__(self, key: str, cmd: list[str]):
         self.key   = key
         self.cmd   = cmd
-        self._proc: subprocess.Popen | None = None
+        self._proc: Optional[subprocess.Popen] = None
         self._lock = threading.Lock()
         self._id   = 0
 
@@ -108,7 +109,7 @@ class McpServer:
         self._id += 1
         return self._id
 
-    def _send(self, payload: dict) -> dict | None:
+    def _send(self, payload: dict) -> Optional[dict]:
         """Send a JSON-RPC request and read the response. Returns result or None."""
         if not self._proc:
             return None
