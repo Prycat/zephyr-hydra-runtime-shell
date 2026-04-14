@@ -900,6 +900,64 @@ class ConsoleWidget(QPlainTextEdit):
                 self.verticalScrollBar().maximum()
             )
 
+class FeedbackBar(QWidget):
+    """
+    Small thumbs-up / thumbs-down row that floats over the console
+    bottom-right briefly after each assistant response completes.
+    Auto-hides after 8 seconds or after a vote is cast.
+    """
+    feedback_given = Signal(bool)   # True = thumbs-up, False = thumbs-down
+
+    _DIM  = "#3a4a5a"
+    _TEAL = "#1a8272"
+    _RED  = "#8b1a1a"
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._voted = False
+        self.setWindowFlags(Qt.WindowType.FramelessWindowHint)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(4, 2, 4, 2)
+        layout.setSpacing(6)
+
+        self._up   = QPushButton("▲")
+        self._down = QPushButton("▼")
+        for btn in (self._up, self._down):
+            btn.setFixedSize(24, 20)
+            btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            btn.setStyleSheet(f"""
+                QPushButton {{
+                    background: #0d1117;
+                    color: {self._DIM};
+                    border: 1px solid {self._DIM};
+                    border-radius: 3px;
+                    font-size: 9px;
+                }}
+                QPushButton:hover {{ color: white; border-color: white; }}
+            """)
+
+        self._up.clicked.connect(lambda: self._vote(True))
+        self._down.clicked.connect(lambda: self._vote(False))
+
+        layout.addStretch()
+        layout.addWidget(self._up)
+        layout.addWidget(self._down)
+        self.adjustSize()
+
+    def _vote(self, positive: bool):
+        if self._voted:
+            return
+        self._voted = True
+        color = self._TEAL if positive else self._RED
+        btn = self._up if positive else self._down
+        btn.setStyleSheet(btn.styleSheet().replace(self._DIM, color, 2))
+        self.feedback_given.emit(positive)
+        # Auto-hide 1s after vote
+        QTimer.singleShot(1000, self.deleteLater)
+
+
 def _iso_proj(wx, wy, wz, pcx, pcy, cosY, sinY, cosP, sinP, cam, bias):
     """Isometric perspective projection → (screen_x, screen_y, depth)."""
     dx  = wx * cosY - wz * sinY
@@ -2116,6 +2174,17 @@ class MainWindow(QMainWindow):
             self._thinking_bar.record_token_gap,
             Qt.ConnectionType.QueuedConnection,
         )
+
+        # Feedback state
+        self._current_session_id: str = ""
+        self._current_turn: int = 0
+
+        self._process.output_signal.connect(self._on_agent_line)
+        self._process.stream_ended.connect(
+            self._on_response_complete,
+            Qt.ConnectionType.QueuedConnection,
+        )
+
         self._process.start()
 
         # ── Wire input → process ──────────────────────────────
@@ -2126,6 +2195,7 @@ class MainWindow(QMainWindow):
 
     def _on_user_input(self, text: str):
         self._console.append_line(f"You: {text}")
+        self._current_turn += 1
         self._thinking_bar.set_loading()
         self._process.send_input(text)
 
@@ -2135,6 +2205,36 @@ class MainWindow(QMainWindow):
     def _on_agent_exit(self):
         self._console.append_line("─── Zephyr process ended ───")
         self._thinking_bar.stop()   # clear LOADING/THINKING if process died mid-stream
+        self._current_turn = 0
+        self._current_session_id = ""
+
+    def _on_agent_line(self, line: str):
+        """Parse special markers from agent stdout."""
+        if line.startswith("<<SESSION:") and line.endswith(">>"):
+            self._current_session_id = line[10:-2]
+
+    def _on_response_complete(self):
+        """Show thumbs feedback bar briefly after each response."""
+        if not self._current_session_id:
+            return
+        bar = FeedbackBar(parent=self._console)
+        bar.feedback_given.connect(self._on_feedback)
+        # Position bottom-right of console
+        bar.adjustSize()
+        x = self._console.width() - bar.width() - 8
+        y = self._console.height() - bar.height() - 4
+        bar.move(x, y)
+        bar.show()
+        bar.raise_()
+        # Auto-hide after 8s if no vote
+        QTimer.singleShot(8000, bar.deleteLater)
+
+    def _on_feedback(self, positive: bool):
+        """Forward thumbs vote to agent via /feedback command."""
+        vote = "up" if positive else "down"
+        self._process.send_input(
+            f"/feedback {self._current_session_id} {self._current_turn} {vote}"
+        )
 
     def _show_model_card(self):
         """Position and show ModelSwitcherCard above ThinkingBar cell 0."""
