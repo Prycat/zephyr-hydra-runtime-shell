@@ -98,3 +98,55 @@ def test_evaluator_does_not_crash_on_error():
         ev.submit("ex-id-2", "hello", "hi")
         ev._worker_step()  # should not raise
         mock_update.assert_not_called()
+
+
+def test_end_to_end_pipeline(tmp_path, monkeypatch):
+    """
+    End-to-end: log turns → check counts → verify JSONL format.
+    Does not call Ollama or touch the real DB.
+    """
+    import blackwell.trajectory as T
+
+    monkeypatch.setattr(T, "SAMPLES_PATH",  str(tmp_path / "trajectory_samples.jsonl"))
+    monkeypatch.setattr(T, "FAILURES_PATH", str(tmp_path / "failed_trajectories.jsonl"))
+    monkeypatch.setattr(T, "FEEDBACK_PATH", str(tmp_path / "trajectory_feedback.jsonl"))
+
+    # Simulate 3 turns: 2 success, 1 exception failure, 1 thumbs-down
+    T.log_success("session-abc", 1, "what is 2+2?", "4", [])
+    T.log_success("session-abc", 2, "search for cats", "found cats", ["web_search"])
+    T.log_failure("session-abc", 3, "crash me", "exception", "ZeroDivisionError: division by zero")
+    T.mark_feedback("session-abc", 1, positive=False)  # thumbs down on turn 1
+
+    # Check counts
+    counts = T.get_counts()
+    assert counts["success"] == 2, f"Expected 2 success, got {counts['success']}"
+    assert counts["failed"] == 1, f"Expected 1 failed, got {counts['failed']}"
+    assert counts["feedback"] == 1, f"Expected 1 feedback, got {counts['feedback']}"
+
+    # Verify trajectory_samples format
+    import json
+    with open(T.SAMPLES_PATH) as f:
+        records = [json.loads(line) for line in f if line.strip()]
+    assert len(records) == 2
+    for r in records:
+        assert r["source"] == "trajectory"
+        assert "session_id" in r
+        assert "turn" in r
+        assert "timestamp" in r
+        assert len(r["conversations"]) == 2
+        assert r["conversations"][0]["from"] == "human"
+        assert r["conversations"][1]["from"] == "gpt"
+
+    # Verify failed format
+    with open(T.FAILURES_PATH) as f:
+        failures = [json.loads(line) for line in f if line.strip()]
+    assert len(failures) == 1
+    assert failures[0]["error_type"] == "exception"
+    assert "ZeroDivisionError" in failures[0]["detail"]
+
+    # Verify feedback format
+    with open(T.FEEDBACK_PATH) as f:
+        feedbacks = [json.loads(line) for line in f if line.strip()]
+    assert len(feedbacks) == 1
+    assert feedbacks[0]["positive"] is False
+    assert feedbacks[0]["turn"] == 1
