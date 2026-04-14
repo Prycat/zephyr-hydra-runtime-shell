@@ -608,6 +608,7 @@ class ZephyrButton(QPushButton):
         self._font = QFont("Consolas", 9)
         self._font.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, 1.5)
         self._font.setBold(True)
+        self._badge_text: str = ""
 
     def set_state(self, state: str):
         """state: idle | running | success | error"""
@@ -644,6 +645,9 @@ class ZephyrButton(QPushButton):
         super().mouseMoveEvent(event)
 
     def paintEvent(self, event):
+        # NOTE: super().paintEvent() intentionally NOT called — this widget is
+        # fully custom-painted. Calling super() would draw native QPushButton
+        # chrome (border, focus ring) on top of all custom layers.
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         w, h = self.width(), self.height()
@@ -734,7 +738,7 @@ class ZephyrButton(QPushButton):
         p.drawEllipse(dot_x - dot_r, dot_y - dot_r, dot_r * 2, dot_r * 2)
 
         # 11. Badge text (pair count)
-        badge = getattr(self, "_badge_text", "")
+        badge = self._badge_text
         if badge:
             badge_font = QFont("Consolas", 7)
             p.setFont(badge_font)
@@ -2109,8 +2113,9 @@ class PaletteWidget(QWidget):
                 self._coding_btn.set_badge(f"{cbw} pairs" if cbw else "")
             if self._trajectory_btn:
                 self._trajectory_btn.set_badge(f"{traj} pairs" if traj else "")
-        except Exception:
-            pass  # badge refresh is non-critical
+        except Exception as exc:
+            import sys
+            print(f"[badge refresh] error: {exc}", file=sys.stderr, flush=True)
 
 
 # ═══════════════════════════════════════════════════════════════
