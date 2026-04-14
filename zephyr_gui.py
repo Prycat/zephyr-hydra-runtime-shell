@@ -2155,23 +2155,11 @@ class MainWindow(QMainWindow):
             }
         """)
 
-        # Left pane: console + input row — centered in a max-width column
-        _CONSOLE_MAX_WIDTH = 900
-
+        # Left pane: console + input row
         left_widget = QWidget()
-        left_outer = QHBoxLayout(left_widget)
-        left_outer.setContentsMargins(0, 0, 0, 0)
-        left_outer.setSpacing(0)
-
-        content_col = QWidget()
-        content_col.setMaximumWidth(_CONSOLE_MAX_WIDTH)
-        left_layout = QVBoxLayout(content_col)
+        left_layout = QVBoxLayout(left_widget)
         left_layout.setContentsMargins(0, 0, 0, 0)
         left_layout.setSpacing(0)
-
-        left_outer.addStretch()
-        left_outer.addWidget(content_col, stretch=1)
-        left_outer.addStretch()
 
         self._console = ConsoleWidget()
         left_layout.addWidget(self._console)
