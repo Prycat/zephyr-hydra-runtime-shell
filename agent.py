@@ -326,6 +326,8 @@ TOOLS AVAILABLE
 3. For run_python: always import httpx, never import requests.
 4. For web_search: make your query specific. Add the current year or topic keywords. Never search generic terms.
 5. After getting a tool result, summarise it concisely — don't repeat the raw output verbatim.
+6. For questions about yourself, your tools, your capabilities, or your feelings — answer directly from memory. NEVER call read_file, code_read, or any other tool for introspective questions. Tools are for external data only.
+7. Every tool has a strict parameter list. NEVER invent parameter names. If unsure of the correct parameters, answer without using a tool.
 
 RESPONSE RULES
 - Be concise. One paragraph max unless detail is explicitly requested.
@@ -443,9 +445,16 @@ def handle_cli(cmd: str, history: list[dict]) -> tuple[bool, list[dict]]:
             print(f"\nOllama: Offline ({e})\n")
 
     elif command == "/model":
-        print(f"\nModel : {MODEL}")
-        print(f"API   : http://localhost:11434/v1")
-        print(f"Team  : Prycat Research\n")
+        model_name = arg.strip()
+        if model_name:
+            global MODEL, client
+            MODEL = model_name
+            client = OpenAI(base_url="http://localhost:11434/v1", api_key="ollama")
+            print(f"[MODEL] switched to {MODEL}")
+        else:
+            print(f"\nModel : {MODEL}")
+            print(f"API   : http://localhost:11434/v1")
+            print(f"Team  : Prycat Research\n")
 
     elif command == "/save":
         vault_dir = r"C:\Users\gamer23\Desktop\vault 1\all zephyr conversations"
@@ -670,7 +679,19 @@ def run_agent(user_message: str, history: list[dict],
                 if tools_called is not None:
                     tools_called.append(fn_name)
                 handler = TOOL_HANDLERS.get(fn_name)
-                result  = handler(fn_args) if handler else f"Unknown tool: {fn_name}"
+                if not handler:
+                    result = f"Unknown tool: {fn_name}"
+                else:
+                    try:
+                        result = handler(fn_args)
+                    except TypeError as e:
+                        # Model passed wrong parameter names — tell it so it can retry correctly
+                        result = (
+                            f"Tool call failed: {e}. "
+                            f"You called '{fn_name}' with unexpected arguments {list(fn_args.keys())}. "
+                            f"Check the required parameters for '{fn_name}' and call it again with the "
+                            f"correct argument names, or answer the question without using a tool."
+                        )
                 history.append({
                     "role":         "tool",
                     "tool_call_id": tc_data["id"],

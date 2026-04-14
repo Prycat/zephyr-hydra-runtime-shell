@@ -2034,6 +2034,19 @@ class MainWindow(QMainWindow):
         self._thinking_bar = ThinkingBar()
         left_layout.addWidget(self._thinking_bar)
 
+        # Load saved config and apply to ThinkingBar
+        _cfg = load_zephyr_config()
+        self._active_model = _cfg.get("active_model", "hermes3:8b")
+        self._tq_enabled = _cfg.get("turboquant_enabled", False)
+        self._thinking_bar.set_active_model(self._active_model)
+        self._thinking_bar.set_turboquant(self._tq_enabled)
+
+        # Model switcher card — singleton, repositioned on each open
+        self._model_card = ModelSwitcherCard()
+        self._model_card.model_selected.connect(self._on_model_selected)
+        self._model_card.turboquant_toggled.connect(self._on_turboquant_toggled)
+        self._thinking_bar.model_cell_clicked.connect(self._show_model_card)
+
         # Input row
         input_row = QWidget()
         input_row.setStyleSheet(
@@ -2120,6 +2133,34 @@ class MainWindow(QMainWindow):
     def _on_agent_exit(self):
         self._console.append_line("─── Zephyr process ended ───")
         self._thinking_bar.stop()   # clear LOADING/THINKING if process died mid-stream
+
+    def _show_model_card(self):
+        """Position and show ModelSwitcherCard above ThinkingBar cell 0."""
+        cell_rect = self._thinking_bar._cell0_rect()
+        global_pos = self._thinking_bar.mapToGlobal(cell_rect.topLeft())
+        # Position card so bottom-left aligns with cell top-left
+        card_h = self._model_card.height() if self._model_card.height() > 0 else 200
+        card_pos = QPoint(global_pos.x(), global_pos.y() - card_h - 4)
+        # Clamp to screen
+        screen = QApplication.primaryScreen().availableGeometry()
+        card_pos.setY(max(screen.top(), card_pos.y()))
+        self._model_card.show_at(card_pos, self._active_model, self._tq_enabled)
+
+    def _on_model_selected(self, model_name: str):
+        """Switch active model in agent and persist."""
+        self._active_model = model_name
+        self._thinking_bar.set_active_model(model_name)
+        cfg = load_zephyr_config()
+        cfg["active_model"] = model_name
+        save_zephyr_config(cfg)
+        self._process.send_input(f"/model {model_name}")
+
+    def _on_turboquant_toggled(self, enabled: bool):
+        self._tq_enabled = enabled
+        self._thinking_bar.set_turboquant(enabled)
+        cfg = load_zephyr_config()
+        cfg["turboquant_enabled"] = enabled
+        save_zephyr_config(cfg)
 
     def closeEvent(self, event):
         self._process.stop()
