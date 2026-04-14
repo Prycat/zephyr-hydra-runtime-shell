@@ -15,7 +15,13 @@ from blackwell.logger import update_scores, get_average_vector
 
 
 def _maybe_trigger_oracle(threshold: float) -> None:
-    """Trigger Oracle synthesis if regret exceeds threshold."""
+    """Trigger Oracle synthesis if regret exceeds threshold.
+
+    1. Gets avg from get_average_vector().
+    2. Computes total regret via total_regret(avg).
+    3. If regret > threshold, computes steering vector and allocation
+       using calculate_projection helpers, then calls synthesise().
+    """
     try:
         avg = get_average_vector()
         if avg is None:
@@ -24,9 +30,13 @@ def _maybe_trigger_oracle(threshold: float) -> None:
         if regret > threshold:
             try:
                 from blackwell.oracle import synthesise
+                from blackwell.calculate_projection import project_onto_S, oracle_allocation
                 print(f"[trajectory] regret={regret:.3f} > {threshold} — triggering Oracle",
                       flush=True)
-                synthesise(avg, {}, {}, n_pairs=20)
+                projection = project_onto_S(avg)
+                steering_v = {d: max(0.0, projection[d] - avg[d]) for d in avg}
+                allocation = oracle_allocation(steering_v, n_pairs=20)
+                synthesise(avg, steering_v, allocation, n_pairs=20)
             except (ImportError, AttributeError) as e:
                 print(f"[trajectory] Oracle import/attribute error: {e}", flush=True)
     except Exception as e:
@@ -67,17 +77,26 @@ class BackgroundEvaluator:
                 self._worker_step()
             except queue.Empty:
                 continue
-            except Exception:
+            except Exception as e:
+                print(f"[bg-evaluator] unexpected loop error: {e}", flush=True)
+                import time; time.sleep(1)  # backoff to avoid hot-spin
                 continue
 
 
 # Module-level singleton
 _evaluator: Optional[BackgroundEvaluator] = None
+_evaluator_lock = threading.Lock()
 
 
-def get_evaluator() -> BackgroundEvaluator:
-    """Return the singleton BackgroundEvaluator, creating it on first call."""
+def get_evaluator() -> "BackgroundEvaluator":
+    """Return the singleton BackgroundEvaluator, creating it on first call.
+
+    Uses double-checked locking to avoid a race condition when multiple
+    threads call get_evaluator() simultaneously before the instance exists.
+    """
     global _evaluator
     if _evaluator is None:
-        _evaluator = BackgroundEvaluator()
+        with _evaluator_lock:
+            if _evaluator is None:
+                _evaluator = BackgroundEvaluator()
     return _evaluator
