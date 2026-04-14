@@ -6,6 +6,7 @@ PySide6 GUI wrapping agent.py via subprocess pipe.
 Python 3.9 compatible.
 """
 import sys
+import os
 import math
 import html
 import random
@@ -16,6 +17,7 @@ import threading
 import time
 from collections import deque
 from typing import Optional
+import json as _json
 
 from PySide6.QtCore import (
     Qt, QThread, Signal, QTimer, QPointF, QRectF
@@ -30,6 +32,34 @@ from PySide6.QtWidgets import (
     QHBoxLayout, QPlainTextEdit, QLineEdit, QPushButton,
     QSplitter, QScrollArea, QLabel, QSizePolicy, QFrame
 )
+
+_CONFIG_DEFAULTS = {
+    "active_model": "hermes3:8b",
+    "turboquant_enabled": False,
+}
+
+
+def _zephyr_config_path() -> str:
+    return os.path.join(os.path.expanduser("~/.zephyr"), "config.json")
+
+
+def load_zephyr_config() -> dict:
+    """Load ~/.zephyr/config.json, returning defaults for missing keys."""
+    try:
+        with open(_zephyr_config_path(), "r") as f:
+            data = _json.load(f)
+        return {**_CONFIG_DEFAULTS, **data}
+    except (FileNotFoundError, _json.JSONDecodeError):
+        return dict(_CONFIG_DEFAULTS)
+
+
+def save_zephyr_config(cfg: dict) -> None:
+    """Persist config dict to ~/.zephyr/config.json."""
+    path = _zephyr_config_path()
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w") as f:
+        _json.dump(cfg, f, indent=2)
+
 
 AGENT_PATH = r"C:\Users\gamer23\Desktop\hermes-agent\agent.py"
 MODEL_NAME  = "hermes3:8b"
