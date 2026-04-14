@@ -4,6 +4,7 @@ tools_mcp.py — MCP stdio bridge for hermes agent.
 Manages MemPalace, Serena, and Ruflo MCP server subprocesses.
 """
 import json
+import shutil
 import subprocess
 import sys
 import threading
@@ -40,11 +41,21 @@ CURATED: Dict[str, Dict[str, str]] = {
 }
 
 # ── Server launch commands ───────────────────────────────────────────────────
-# On Windows, npx/uvx live in a different PATH than Python sees via subprocess.
-# Use "npx.cmd" / "uvx.cmd" so Windows shell resolution finds them correctly.
-_WIN = sys.platform == "win32"
-_NPX = "npx.cmd" if _WIN else "npx"
-_UVX = "uvx.cmd" if _WIN else "uvx"
+# shutil.which() resolves the real executable path so subprocess finds it
+# regardless of whether Windows .cmd shims or bare .exe files are used.
+def _which(name: str) -> str:
+    """Return the full path to `name`, trying common Windows suffixes if needed."""
+    found = shutil.which(name)
+    if found:
+        return found
+    for suffix in (".cmd", ".exe", ".bat"):
+        found = shutil.which(name + suffix)
+        if found:
+            return found
+    return name  # fall back to bare name; Popen will raise FileNotFoundError with a clear message
+
+_NPX = _which("npx")
+_UVX = _which("uvx")
 
 SERVER_CMDS: Dict[str, List[str]] = {
     "mempalace": [sys.executable, "-m", "mempalace.mcp_server"],
