@@ -708,13 +708,12 @@ class ThinkingBar(QWidget):
         """Return a GRID_Z × GRID_X list-of-lists of normalized heights (0.0–1.0).
 
         Axes:
-          X (columns, ix 0→19): token position, oldest left → newest right
-          Z (rows,    iz 0→2):  smoothing lane
-            iz=0  raw inter-token gap (jagged front)
-            iz=1  5-sample rolling average (mid depth)
-            iz=2  7-sample rolling average (smooth back)
+          X (columns, ix 0→9): token position, oldest left → newest right
+          Z (rows,    iz 0→9): smoothing lane — front=raw, back=heavily averaged
+            iz=0  raw inter-token gap (jagged, nearest lane)
+            iz=k  (2k+1)-sample rolling average  (k=1..9, progressively smoother)
         """
-        GRID_X, GRID_Z = 20, 3
+        GRID_X, GRID_Z = 10, 10
         gaps = list(self._token_gaps)   # oldest first
         N    = len(gaps)
         norm = max(1.0, self._gap_max)
@@ -736,9 +735,9 @@ class ThinkingBar(QWidget):
                 if iz == 0:
                     h = raw_v
                 else:
-                    # Wider smoothing kernel for deeper Z lanes:
-                    # iz=1 → half=2 → 5 samples; iz=2 → half=3 → 7 samples
-                    half    = 1 + iz
+                    # half=iz → kernel width = 2*iz+1 samples
+                    # iz=1→3-smp, iz=2→5-smp, … iz=9→19-smp (smooth back)
+                    half    = iz
                     centre  = int(t * (N - 1))
                     samples = [gaps[max(0, min(N - 1, centre + off))]
                                for off in range(-half, half + 1)]
@@ -929,46 +928,46 @@ class ThinkingBar(QWidget):
             rx, ry = right_x, PAD
 
             # ── 3D Token-Timing Surface ───────────────────────
-            # X = token position bucket (0=oldest, 19=newest)
-            # Z = smoothing lane (0=raw, 1=5-avg, 2=7-avg)
-            # Y = normalized inter-token gap (tall spike = slow token)
-            VH = 36                 # slightly taller than old 32
-            GRID_X, GRID_Z = 20, 3
-            CELL_X  =  8.5          # world units per X column
-            CELL_Z  = 14.0          # world units per Z lane
-            MAX_H   = 26.0          # world units when gap = 1.0
-            _YAW    = 0.78          # horizontal rotation (≈45°)
-            _PITCH  = -0.46         # tilt downward
-            _CAM    = 340.0         # perspective camera distance
-            _BIAS   = 230.0         # depth bias
+            # X = token bucket  (0=oldest, 9=newest)
+            # Z = smoothing lane (0=raw front, 9=heavily-averaged back)
+            # Y = normalised inter-token gap height
+            #
+            # Grid is 10×10 (square), YAW=45° → projects as a diamond
+            # filling the full width; shallow PITCH gives low-angle look.
+            VH     = 50               # panel height (px)
+            GRID_X = GRID_Z = 10
+            CELL   = 24.0             # world units per cell (equal X & Z → square)
+            MAX_H  = 20.0             # world height when gap=1.0
+            _YAW   = math.pi / 4     # exactly 45° → perfect diamond silhouette
+            _PITCH = -0.20            # very shallow: low-angle isometric feel
+            _CAM   = 300.0
+            _BIAS  = 160.0
 
-            _cosY = math.cos(_YAW);  _sinY = math.sin(_YAW)
+            _cosY = math.cos(_YAW);  _sinY = math.sin(_YAW)   # = 1/√2 each
             _cosP = math.cos(_PITCH); _sinP = math.sin(_PITCH)
 
-            # Projection centre: slightly below vertical centre of the panel
+            # Centre projection on the right block; ground plane sits at 75 %
             _pcx = rx + RIGHT_W * 0.5
-            _pcy = ry + VH * 0.64
+            _pcy = ry + VH * 0.75
 
-            # Compute height field (0–1 normalised)
+            # Height field (0–1), 10 rows × 10 cols
             _hf = self._surface_heights()
 
-            # READY/LOADING: gentle slow pulse keeps terrain alive when idle
+            # Idle pulse so terrain breathes when no tokens are flowing
             if not self._active:
                 _pulse = 0.06 * (0.5 + 0.5 * math.sin(self._frame * 0.025))
                 _hf = [[min(1.0, v + _pulse) for v in row] for row in _hf]
 
-            # Build projected quads
-            _sig_c = self._sig()
-            _quads = []
-            _half_x = (GRID_X - 1) / 2.0
-            _half_z = (GRID_Z - 1) / 2.0
+            # Build projected quads (9×9 = 81 quads)
+            _sig_c  = self._sig()
+            _quads  = []
+            _half   = (GRID_X - 1) / 2.0      # same for X and Z (square)
             for iz in range(GRID_Z - 1):
                 for ix in range(GRID_X - 1):
-                    wx0 = (ix     - _half_x) * CELL_X
-                    wx1 = (ix + 1 - _half_x) * CELL_X
-                    wz0 = (iz     - _half_z) * CELL_Z
-                    wz1 = (iz + 1 - _half_z) * CELL_Z
-                    # Negative Y: screen-Y increases downward, world-Y up
+                    wx0 = (ix     - _half) * CELL
+                    wx1 = (ix + 1 - _half) * CELL
+                    wz0 = (iz     - _half) * CELL
+                    wz1 = (iz + 1 - _half) * CELL
                     h00 = _hf[iz  ][ix  ] * MAX_H
                     h10 = _hf[iz  ][ix+1] * MAX_H
                     h11 = _hf[iz+1][ix+1] * MAX_H
@@ -981,13 +980,13 @@ class ThinkingBar(QWidget):
                     avg_h     = (h00  + h10  + h11  + h01 ) * 0.25
                     _quads.append((avg_depth, avg_h, a, b, c, d))
 
-            # Painter's algorithm: back-to-front depth sort
+            # Painter's algorithm: back-to-front
             _quads.sort(key=lambda q: q[0])
 
-            # Pass 1: filled + wireframe quads
+            # Pass 1: filled quads + grid lines
             for _dep, _ah, _a, _b, _c, _d in _quads:
                 _inten  = min(1.0, _ah / MAX_H)
-                _falpha = int(14 + _inten * 72)
+                _falpha = int(10 + _inten * 80)
                 _path   = QPainterPath()
                 _path.moveTo(QPointF(_a[0], _a[1]))
                 _path.lineTo(QPointF(_b[0], _b[1]))
@@ -998,21 +997,21 @@ class ThinkingBar(QWidget):
                 p.setBrush(QBrush(QColor(
                     _sig_c.red(), _sig_c.green(), _sig_c.blue(), _falpha)))
                 p.drawPath(_path)
-                _salpha = int(8 + _inten * 38)
-                p.setPen(QPen(QColor(200, 230, 255, _salpha), 0.6))
+                _salpha = int(6 + _inten * 32)
+                p.setPen(QPen(QColor(200, 230, 255, _salpha), 0.5))
                 p.setBrush(Qt.BrushStyle.NoBrush)
                 p.drawPath(_path)
 
-            # Pass 2: radial glow on high peaks
+            # Pass 2: radial glow on peaks
             for _dep, _ah, _a, _b, _c, _d in _quads:
                 _inten = min(1.0, _ah / MAX_H)
-                if _inten < 0.28:
+                if _inten < 0.22:
                     continue
                 _qcx = (_a[0] + _b[0] + _c[0] + _d[0]) * 0.25
                 _qcy = (_a[1] + _b[1] + _c[1] + _d[1]) * 0.25
-                _rg  = 3.5 + _inten * 5.5
+                _rg  = 2.5 + _inten * 5.0
                 _gg  = QRadialGradient(QPointF(_qcx, _qcy), _rg)
-                _gg.setColorAt(0, self._sig(int(55 * _inten)))
+                _gg.setColorAt(0, self._sig(int(60 * _inten)))
                 _gg.setColorAt(1, QColor(0, 0, 0, 0))
                 p.setPen(Qt.PenStyle.NoPen)
                 p.setBrush(QBrush(_gg))
