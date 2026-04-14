@@ -40,12 +40,24 @@ CURATED: Dict[str, Dict[str, str]] = {
 }
 
 # ── Server launch commands ───────────────────────────────────────────────────
+# On Windows, npx/uvx live in a different PATH than Python sees via subprocess.
+# Use "npx.cmd" / "uvx.cmd" so Windows shell resolution finds them correctly.
+_WIN = sys.platform == "win32"
+_NPX = "npx.cmd" if _WIN else "npx"
+_UVX = "uvx.cmd" if _WIN else "uvx"
 
 SERVER_CMDS: Dict[str, List[str]] = {
     "mempalace": [sys.executable, "-m", "mempalace.mcp_server"],
-    "serena":    ["uvx", "--from", "git+https://github.com/oraios/serena",
+    "serena":    [_UVX, "--from", "git+https://github.com/oraios/serena",
                   "serena", "start-mcp-server"],
-    "ruflo":     ["npx", "ruflo@latest", "mcp", "start"],
+    "ruflo":     [_NPX, "ruflo@latest", "mcp", "start"],
+}
+
+# Warmup times: slow starters (npx/uvx first cold-start clones the package)
+_WARMUP: Dict[str, float] = {
+    "mempalace": 1.0,
+    "serena":    8.0,   # uvx clones repo on cold start; cached runs are ~2s
+    "ruflo":     5.0,   # npx downloads ruflo@latest on first use
 }
 
 # ── McpServer class ──────────────────────────────────────────────────────────
@@ -75,8 +87,8 @@ class McpServer:
                 text=True,
                 encoding="utf-8",
             )
-            # Allow slow starters (npx, uvx) to warm up
-            time.sleep(1.5)
+            # Allow slow starters (npx, uvx) to warm up; first cold-start may download packages
+            time.sleep(_WARMUP.get(self.key, 2.0))
             # Send initialize handshake
             self._send({
                 "method": "initialize",
