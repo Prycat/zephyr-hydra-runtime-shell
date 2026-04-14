@@ -844,6 +844,9 @@ class ConsoleWidget(QPlainTextEdit):
 
     def append_line(self, line: str):
         """Colorize and append one line from the agent."""
+        # Silently consume protocol markers that should not render
+        if line.startswith("<<SESSION:") and line.endswith(">>"):
+            return
         # ── Streaming protocol ────────────────────────────────
         if line == "<<ZS>>":
             self._begin_stream()
@@ -915,6 +918,9 @@ class FeedbackBar(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._voted = False
+        self._auto_hide_timer = QTimer(self)
+        self._auto_hide_timer.setSingleShot(True)
+        self._auto_hide_timer.timeout.connect(self.deleteLater)
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
 
@@ -954,7 +960,8 @@ class FeedbackBar(QWidget):
         btn = self._up if positive else self._down
         btn.setStyleSheet(btn.styleSheet().replace(self._DIM, color, 2))
         self.feedback_given.emit(positive)
-        # Auto-hide 1s after vote
+        # Cancel the 8-second auto-hide timer before scheduling our own
+        self._auto_hide_timer.stop()
         QTimer.singleShot(1000, self.deleteLater)
 
 
@@ -2227,7 +2234,7 @@ class MainWindow(QMainWindow):
         bar.show()
         bar.raise_()
         # Auto-hide after 8s if no vote
-        QTimer.singleShot(8000, bar.deleteLater)
+        bar._auto_hide_timer.start(8000)
 
     def _on_feedback(self, positive: bool):
         """Forward thumbs vote to agent via /feedback command."""
