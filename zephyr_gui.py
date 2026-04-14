@@ -2121,8 +2121,6 @@ class PaletteWidget(QWidget):
 # ═══════════════════════════════════════════════════════════════
 #  MainWindow
 # ═══════════════════════════════════════════════════════════════
-_CONSOLE_MAX_WIDTH = 900  # console text column max-width in pixels
-
 class MainWindow(QMainWindow):
 
     def __init__(self):
@@ -2158,6 +2156,8 @@ class MainWindow(QMainWindow):
         """)
 
         # Left pane: console + input row — centered in a max-width column
+        _CONSOLE_MAX_WIDTH = 900
+
         left_widget = QWidget()
         left_outer = QHBoxLayout(left_widget)
         left_outer.setContentsMargins(0, 0, 0, 0)
@@ -2170,7 +2170,7 @@ class MainWindow(QMainWindow):
         left_layout.setSpacing(0)
 
         left_outer.addStretch()
-        left_outer.addWidget(content_col)
+        left_outer.addWidget(content_col, stretch=1)
         left_outer.addStretch()
 
         self._console = ConsoleWidget()
