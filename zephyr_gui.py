@@ -914,14 +914,21 @@ def _iso_proj(wx, wy, wz, pcx, pcy, cosY, sinY, cosP, sinP, cam, bias):
 # ═══════════════════════════════════════════════════════════════
 class ThinkingBar(QWidget):
     HEIGHT = 80
-    _CELL_LABELS = ["PARSE",  "/BLACKWELL",  "COMMIT",   "LOAD"]
-    _CELL_VALUES = ["weighted", "vector accrual", "branch sel.", "inertia cls-v"]
+    _CELL_LABELS = ["MODEL",   "/BLACKWELL",  "COMMIT",   "LOAD"]
+    _CELL_VALUES = ["hermes3:8b", "vector accrual", "branch sel.", "inertia cls-v"]
+
+    model_cell_clicked = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setFixedHeight(self.HEIGHT)
         self.setSizePolicy(QSizePolicy.Policy.Expanding,
                            QSizePolicy.Policy.Fixed)
+        self.setMouseTracking(True)
+        self._model_cell_hovered = False
+        self._tq_enabled = False
+        self._active_model_full = "hermes3:8b"
+        self._CELL_VALUES = list(self._CELL_VALUES)  # make instance-level mutable copy
 
         # Animation state
         self._stress   = 0.26;  self._t_stress = 0.26
@@ -1019,6 +1026,19 @@ class ThinkingBar(QWidget):
     def _collapse(self):
         pass   # kept for compatibility, no longer used
 
+    def _cell0_rect(self) -> QRect:
+        """Bounding rect of cell 0 in local widget coordinates."""
+        W, H = self.width(), self.height()
+        PAD     = 12
+        LEFT_W  = 196
+        RIGHT_W = 200
+        mid_x   = PAD + LEFT_W + 10
+        mid_w   = W - PAD - LEFT_W - 10 - RIGHT_W - 10 - PAD
+        cell_gap = 6
+        cell_w   = max(1, (mid_w - cell_gap * 3) // 4)
+        cell_h   = H - PAD * 2
+        return QRect(int(mid_x), PAD, int(cell_w), int(cell_h))
+
     # ── Animation ─────────────────────────────────────────────
     @staticmethod
     def _lerp(a, b, t):
@@ -1056,6 +1076,40 @@ class ThinkingBar(QWidget):
         flow_speed = 0.28 if self._active else 0.06
         self._vflow = (self._vflow + flow_speed) % 36.0
         self.update()
+
+    def set_active_model(self, model: str):
+        """Update cell 0 to display the active model name."""
+        self._active_model_full = model
+        display = model if len(model) <= 14 else model[:13] + "\u2026"
+        if self._tq_enabled:
+            display = (model if len(model) <= 11 else model[:11]) + " TQ"
+        self._CELL_VALUES[0] = display
+        self.update()
+
+    def set_turboquant(self, enabled: bool):
+        """Toggle TurboQuant badge on cell 0."""
+        self._tq_enabled = enabled
+        self.set_active_model(self._active_model_full)
+
+    # ── Mouse interaction (cell 0) ────────────────────────────
+    def mouseMoveEvent(self, e):
+        hovered = self._cell0_rect().contains(e.pos())
+        if hovered != self._model_cell_hovered:
+            self._model_cell_hovered = hovered
+            self.setCursor(Qt.PointingHandCursor if hovered else Qt.ArrowCursor)
+            self.update()
+        super().mouseMoveEvent(e)
+
+    def leaveEvent(self, e):
+        if self._model_cell_hovered:
+            self._model_cell_hovered = False
+            self.setCursor(Qt.ArrowCursor)
+            self.update()
+
+    def mousePressEvent(self, e):
+        if e.button() == Qt.LeftButton and self._cell0_rect().contains(e.pos()):
+            self.model_cell_clicked.emit()
+        super().mousePressEvent(e)
 
     # ── Signal colour ─────────────────────────────────────────
     # READY  → stress-modulated teal  (cool → bright teal)
@@ -1173,6 +1227,10 @@ class ThinkingBar(QWidget):
                 p.setPen(QPen(QColor(255, 255, 255, 22), 1))
                 p.setBrush(QBrush(QColor(255, 255, 255, 12)))
                 p.drawRect(QRectF(cx, cy, cell_w, cell_h))
+
+                if i == 0 and self._model_cell_hovered:
+                    p.setPen(QPen(QColor("#2a6258"), 1))
+                    p.drawRect(QRectF(cx, cy, cell_w, cell_h))
 
                 p.setFont(QFont("Consolas", 7))
                 p.setPen(QColor(191, 203, 212, 118))
