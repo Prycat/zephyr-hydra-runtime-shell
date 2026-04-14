@@ -1153,59 +1153,269 @@ class InputBar(QLineEdit):
 
 
 # ═══════════════════════════════════════════════════════════════
-#  HeaderBar
+#  ZephyrTitleBar — custom frameless title bar
+#  Pixel hydra mark · frosted glass · draggable · window controls
 # ═══════════════════════════════════════════════════════════════
-class HeaderBar(QWidget):
+class ZephyrTitleBar(QWidget):
+    """
+    Fully custom-painted title bar replacing the OS chrome.
+    Left:   10×8 pixel hydra icon in emerald + ZEPHYR wordmark + live dot
+    Right:  minimize / maximize / close buttons (painted, hover-aware)
+    Drag:   click-drag anywhere outside the buttons moves the window
+    """
+
+    HEIGHT = 48
+
+    # Pixel hydra cells as (col, row) in a 10-col × 8-row grid (0-indexed)
+    _HYDRA: frozenset = frozenset([
+        # center spine
+        (5,1),(5,2),(5,3),(5,4),(5,5),(5,6),
+        # left head / neck
+        (3,1),(4,1),(4,2),(3,2),(2,2),(2,1),
+        # right head / neck
+        (6,1),(7,1),(7,2),(8,2),(8,1),(6,2),
+        # lower flares
+        (4,4),(3,5),(2,6),(4,5),
+        (6,4),(7,5),(8,6),(6,5),
+        # center jaw / body width
+        (4,3),(6,3),(4,6),(6,6),
+    ])
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setFixedHeight(40)
-        self.setStyleSheet("background-color: #0d1117;")
+        self.setFixedHeight(self.HEIGHT)
+        self.setMouseTracking(True)
+        self.setAttribute(Qt.WidgetAttribute.WA_Hover, True)
 
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(16, 0, 16, 0)
-        layout.setSpacing(10)
+        self._drag_pos   = None          # for window dragging
+        self._hovered    = None          # 'min' | 'max' | 'close' | None
+        self._dot_phase  = 0.0           # live-dot sine phase
 
-        # Pulsing dot
-        self._dot = QLabel("●")
-        self._dot.setStyleSheet("color: rgba(102,196,122,0.95); font-size: 10px;")
-        layout.addWidget(self._dot)
+        pulse = QTimer(self)
+        pulse.setInterval(40)            # 25 fps is plenty for a sine wave
+        pulse.timeout.connect(self._tick)
+        pulse.start()
 
-        # ZEPHYR label
-        title = QLabel("ZEPHYR")
-        title.setStyleSheet("""
-            color: rgba(128,221,202,0.92);
-            font-family: Consolas, monospace;
-            font-size: 13px;
-            font-weight: bold;
-            letter-spacing: 4px;
-        """)
-        layout.addWidget(title)
+    # ── Animation ────────────────────────────────────────────────
 
-        # Model name
-        model_lbl = QLabel(MODEL_NAME)
-        model_lbl.setStyleSheet("""
-            color: rgba(170,182,194,0.5);
-            font-family: Consolas, monospace;
-            font-size: 10px;
-            letter-spacing: 2px;
-        """)
-        layout.addWidget(model_lbl)
-        layout.addStretch()
+    def _tick(self):
+        self._dot_phase = (self._dot_phase + 0.07) % (2 * math.pi)
+        self.update()
 
-        # Dot pulse timer
-        self._dot_on = True
-        dot_timer = QTimer(self)
-        dot_timer.setInterval(750)
-        dot_timer.timeout.connect(self._pulse_dot)
-        dot_timer.start()
+    # ── Button geometry ──────────────────────────────────────────
 
-    def _pulse_dot(self):
-        self._dot_on = not self._dot_on
-        alpha = "0.95" if self._dot_on else "0.35"
-        self._dot.setStyleSheet(
-            f"color: rgba(102,196,122,{alpha}); font-size: 10px;"
-        )
+    def _btn_rects(self):
+        """Return (min_rect, max_rect, close_rect) as plain tuples (x,y,w,h)."""
+        W, H = self.width(), self.HEIGHT
+        bw, bh, pad = 38, 22, 8
+        cy = (H - bh) // 2
+        cx = W - pad - bw
+        mx = cx - pad - bw
+        nx = mx - pad - bw
+        return (nx, cy, bw, bh), (mx, cy, bw, bh), (cx, cy, bw, bh)
+
+    def _btn_hit(self, px, py):
+        """Return which button contains (px,py), or None."""
+        for key, rect in zip(("min","max","close"), self._btn_rects()):
+            x,y,w,h = rect
+            if x <= px <= x+w and y <= py <= y+h:
+                return key
+        return None
+
+    # ── Paint ─────────────────────────────────────────────────────
+
+    def paintEvent(self, _event):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        W, H = self.width(), self.HEIGHT
+
+        # ── Background: deep navy, 90 % opaque ─────────────────
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(QBrush(QColor(7, 11, 18, 232)))
+        p.drawRect(0, 0, W, H)
+
+        # Left emerald ambient bloom
+        bloom = QRadialGradient(QPointF(70, H * 0.5), 100)
+        bloom.setColorAt(0.0, QColor(26, 130, 115, 32))
+        bloom.setColorAt(1.0, QColor(0, 0, 0, 0))
+        p.setBrush(QBrush(bloom))
+        p.drawRect(0, 0, W, H)
+
+        # Top highlight stripe (1 px)
+        hl = QLinearGradient(0, 0, W, 0)
+        hl.setColorAt(0.00, QColor(255, 255, 255,  0))
+        hl.setColorAt(0.25, QColor(255, 255, 255, 40))
+        hl.setColorAt(0.65, QColor(128, 221, 202, 28))
+        hl.setColorAt(1.00, QColor(255, 255, 255,  0))
+        p.setBrush(QBrush(hl))
+        p.drawRect(0, 0, W, 1)
+
+        # Bottom separator
+        p.setBrush(QBrush(QColor(255, 255, 255, 10)))
+        p.drawRect(0, H - 1, W, 1)
+
+        # ── Pixel hydra icon ────────────────────────────────────
+        IX, IY   = 14, 6          # icon top-left
+        IW, IH   = 36, 36         # rendered size in px
+        COLS, ROWS = 10, 8
+        CW   = IW / COLS
+        CH   = IH / ROWS
+        GAP  = 0.9
+
+        # Icon background pill
+        p.setBrush(QBrush(QColor(0, 0, 0, 55)))
+        p.setPen(QPen(QColor(26, 130, 115, 55), 0.8))
+        p.drawRoundedRect(QRectF(IX - 3, IY - 3, IW + 6, IH + 6), 6, 6)
+
+        p.setPen(Qt.PenStyle.NoPen)
+        for (cx, cy) in self._HYDRA:
+            rx = IX + cx * CW + GAP * 0.5
+            ry = IY + cy * CH + GAP * 0.5
+            rw = CW - GAP
+            rh = CH - GAP
+            # Soft outer glow
+            p.setBrush(QBrush(QColor(74, 222, 128, 38)))
+            p.drawRoundedRect(QRectF(rx - 1.2, ry - 1.2, rw + 2.4, rh + 2.4), 1.2, 1.2)
+            # Cell body
+            p.setBrush(QBrush(QColor(74, 222, 128, 218)))
+            p.drawRoundedRect(QRectF(rx, ry, rw, rh), 0.7, 0.7)
+
+        # ── ZEPHYR wordmark ─────────────────────────────────────
+        TX = IX + IW + 12
+        p.setFont(QFont("Consolas", 12, QFont.Weight.Bold))
+        p.setPen(QColor(210, 230, 225, 230))
+        p.drawText(int(TX), int(H * 0.5 + 4), "ZEPHYR")
+
+        title_w = p.fontMetrics().horizontalAdvance("ZEPHYR")
+
+        p.setFont(QFont("Consolas", 8))
+        p.setPen(QColor(26, 155, 135, 155))
+        p.drawText(int(TX), int(H * 0.5 + 16), "hydra runtime shell")
+
+        # ── Live dot (sine-pulsed) ───────────────────────────────
+        dot_a = int(170 + 85 * math.sin(self._dot_phase))
+        DX = TX + title_w + 14
+        DY = H * 0.5 - 3.0
+        DR = 3.2
+        # Glow halo
+        glow = QRadialGradient(QPointF(DX, DY), DR * 2.8)
+        glow.setColorAt(0.0, QColor(102, 196, 122, dot_a))
+        glow.setColorAt(1.0, QColor(0, 0, 0, 0))
+        p.setBrush(QBrush(glow))
+        p.setPen(Qt.PenStyle.NoPen)
+        p.drawEllipse(QPointF(DX, DY), DR * 2.8, DR * 2.8)
+        # Dot core
+        p.setBrush(QBrush(QColor(120, 210, 140, min(255, dot_a + 40))))
+        p.drawEllipse(QPointF(DX, DY), DR, DR)
+
+        # ── Window control buttons ───────────────────────────────
+        # (key, bg_norm, bg_hover, border, icon_colour)
+        BTN_STYLES = {
+            "min":   (QColor(255,255,255, 10), QColor(255,255,255, 22),
+                      QColor(255,255,255, 18), QColor(170, 182, 194, 200)),
+            "max":   (QColor(26, 130, 115, 16), QColor(26, 130, 115, 34),
+                      QColor(26, 130, 115, 40), QColor(128, 221, 202, 200)),
+            "close": (QColor(160,  40,  40, 18), QColor(200,  55,  55, 38),
+                      QColor(200,  60,  60, 45), QColor(220,  88,  88, 215)),
+        }
+
+        for key, (x, y, bw, bh) in zip(("min","max","close"), self._btn_rects()):
+            hov = (self._hovered == key)
+            bg_n, bg_h, bd, ic = BTN_STYLES[key]
+            rect = QRectF(x, y, bw, bh)
+
+            # Face
+            p.setBrush(QBrush(bg_h if hov else bg_n))
+            p.setPen(QPen(bd if hov else QColor(255,255,255,14), 0.7))
+            p.drawRoundedRect(rect, 6, 6)
+
+            # Top sheen
+            sheen = QLinearGradient(rect.topLeft(), rect.bottomLeft())
+            sheen.setColorAt(0, QColor(255,255,255, 16 if hov else 10))
+            sheen.setColorAt(1, QColor(0,0,0,0))
+            p.setBrush(QBrush(sheen))
+            p.setPen(Qt.PenStyle.NoPen)
+            p.drawRoundedRect(rect, 6, 6)
+
+            # Icon strokes
+            ccx = rect.center().x()
+            ccy = rect.center().y()
+            pen = QPen(ic, 1.6, Qt.PenStyle.SolidLine,
+                       Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin)
+            p.setPen(pen)
+            p.setBrush(Qt.BrushStyle.NoBrush)
+
+            if key == "min":
+                p.drawLine(QPointF(ccx - 5.5, ccy), QPointF(ccx + 5.5, ccy))
+            elif key == "max":
+                w_m = self.window()
+                if w_m and w_m.isMaximized():
+                    # Restore icon: two overlapping squares
+                    p.drawRect(QRectF(ccx - 5, ccy - 4.5, 8.5, 7.5))
+                    p.drawRect(QRectF(ccx - 3, ccy - 6.5, 8.5, 7.5))
+                else:
+                    p.drawRect(QRectF(ccx - 4.5, ccy - 4, 9, 8))
+            else:  # close
+                p.drawLine(QPointF(ccx - 4.5, ccy - 3.5), QPointF(ccx + 4.5, ccy + 3.5))
+                p.drawLine(QPointF(ccx + 4.5, ccy - 3.5), QPointF(ccx - 4.5, ccy + 3.5))
+
+        p.end()
+
+    # ── Mouse events ─────────────────────────────────────────────
+
+    def mousePressEvent(self, event):
+        if event.button() != Qt.MouseButton.LeftButton:
+            return
+        pos = event.position().toPoint()
+        hit = self._btn_hit(pos.x(), pos.y())
+        if hit == "close":
+            self.window().close()
+        elif hit == "max":
+            w = self.window()
+            w.showNormal() if w.isMaximized() else w.showMaximized()
+        elif hit == "min":
+            self.window().showMinimized()
+        else:
+            self._drag_pos = (
+                event.globalPosition().toPoint()
+                - self.window().frameGeometry().topLeft()
+            )
+        event.accept()
+
+    def mouseMoveEvent(self, event):
+        pos = event.position().toPoint()
+        prev = self._hovered
+        self._hovered = self._btn_hit(pos.x(), pos.y())
+        if self._hovered != prev:
+            self.update()
+            self.setCursor(
+                Qt.CursorShape.PointingHandCursor
+                if self._hovered else Qt.CursorShape.ArrowCursor
+            )
+        if (event.buttons() & Qt.MouseButton.LeftButton
+                and self._drag_pos is not None
+                and self._hovered is None):
+            self.window().move(
+                event.globalPosition().toPoint() - self._drag_pos
+            )
+        event.accept()
+
+    def mouseReleaseEvent(self, event):
+        self._drag_pos = None
+        event.accept()
+
+    def mouseDoubleClickEvent(self, event):
+        if self._btn_hit(event.position().toPoint().x(),
+                         event.position().toPoint().y()) is None:
+            w = self.window()
+            w.showNormal() if w.isMaximized() else w.showMaximized()
+        event.accept()
+
+    def leaveEvent(self, event):
+        if self._hovered is not None:
+            self._hovered = None
+            self.update()
+        self.setCursor(Qt.CursorShape.ArrowCursor)
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -1459,6 +1669,12 @@ class MainWindow(QMainWindow):
         self.resize(1100, 700)
         self.setMinimumSize(800, 500)
 
+        # Remove OS chrome — our ZephyrTitleBar takes over
+        self.setWindowFlags(
+            Qt.WindowType.FramelessWindowHint
+            | Qt.WindowType.Window
+        )
+
         # ── Central widget ────────────────────────────────────
         central = QWidget()
         self.setCentralWidget(central)
@@ -1466,15 +1682,9 @@ class MainWindow(QMainWindow):
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
 
-        # Header
-        self._header = HeaderBar()
+        # Custom title bar (replaces HeaderBar)
+        self._header = ZephyrTitleBar()
         root.addWidget(self._header)
-
-        # Thin divider line
-        div = QFrame()
-        div.setFrameShape(QFrame.Shape.HLine)
-        div.setStyleSheet("color: rgba(255,255,255,0.06); margin: 0;")
-        root.addWidget(div)
 
         # Splitter: console left | palette right
         splitter = QSplitter(Qt.Orientation.Horizontal)
