@@ -777,6 +777,9 @@ class ConsoleWidget(QPlainTextEdit):
         font = QFont("Consolas", 10)
         self.setFont(font)
 
+        # Left/right breathing room so text doesn't hug the edges
+        self.setViewportMargins(32, 8, 32, 8)
+
         palette = self.palette()
         palette.setColor(QPalette.ColorRole.Base, C_BG)
         palette.setColor(QPalette.ColorRole.Text, C_TEAL)
