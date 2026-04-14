@@ -63,3 +63,41 @@ def test_save_creates_directory(tmp_path):
     finally:
         zephyr_gui._zephyr_config_path = orig
     assert os.path.exists(cfg_path)
+
+import json as _json
+from unittest.mock import patch, MagicMock
+
+def test_ollama_fetch_thread_parses_response():
+    """OllamaFetchThread emits parsed model list on success."""
+    import zephyr_gui
+    fake_response = {"models": [
+        {"name": "hermes3:8b"},
+        {"name": "hermes3:8b-q4_0"},
+        {"name": "mistral:7b-instruct-q4_0"},
+    ]}
+    thread = zephyr_gui.OllamaFetchThread()
+    received = []
+    thread.models_ready.connect(lambda models: received.extend(models))
+
+    with patch("zephyr_gui.urllib.request.urlopen") as mock_open:
+        mock_resp = MagicMock()
+        mock_resp.read.return_value = _json.dumps(fake_response).encode()
+        mock_resp.__enter__ = MagicMock(return_value=mock_resp)
+        mock_resp.__exit__ = MagicMock(return_value=False)
+        mock_open.return_value = mock_resp
+        thread.run()  # call run() directly, not start()
+
+    assert "hermes3:8b" in received
+    assert "mistral:7b-instruct-q4_0" in received
+
+def test_ollama_fetch_thread_emits_empty_on_error():
+    """OllamaFetchThread emits empty list when Ollama is unreachable."""
+    import zephyr_gui
+    thread = zephyr_gui.OllamaFetchThread()
+    received = []
+    thread.models_ready.connect(lambda models: received.extend(models))
+
+    with patch("zephyr_gui.urllib.request.urlopen", side_effect=OSError("refused")):
+        thread.run()
+
+    assert received == []

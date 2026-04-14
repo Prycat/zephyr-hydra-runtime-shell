@@ -18,6 +18,7 @@ import time
 from collections import deque
 from typing import Optional
 import json as _json
+import urllib.request
 
 from PySide6.QtCore import (
     Qt, QThread, Signal, QTimer, QPointF, QRectF
@@ -65,6 +66,22 @@ def save_zephyr_config(cfg: dict) -> None:
     with open(tmp, "w") as f:
         _json.dump(cfg, f, indent=2)
     os.replace(tmp, path)
+
+
+class OllamaFetchThread(QThread):
+    """Fetches available Ollama models in background. Emits list of name strings."""
+    models_ready = Signal(list)  # list[str]
+
+    _URL = "http://localhost:11434/api/tags"
+
+    def run(self):
+        try:
+            with urllib.request.urlopen(self._URL, timeout=3) as r:
+                data = _json.loads(r.read())
+            names = [m["name"] for m in data.get("models", [])]
+        except Exception:
+            names = []
+        self.models_ready.emit(names)
 
 
 AGENT_PATH = r"C:\Users\gamer23\Desktop\hermes-agent\agent.py"
