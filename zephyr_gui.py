@@ -19,9 +19,10 @@ from collections import deque
 from typing import Optional
 import json as _json
 import urllib.request
+import re
 
 from PySide6.QtCore import (
-    Qt, QThread, Signal, QTimer, QPointF, QRectF
+    Qt, QThread, Signal, QTimer, QPointF, QRectF, QPoint, QRect, QEvent
 )
 from PySide6.QtGui import (
     QColor, QPainter, QPen, QBrush, QRadialGradient,
@@ -82,6 +83,221 @@ class OllamaFetchThread(QThread):
         except Exception:
             names = []
         self.models_ready.emit(names)
+
+
+def _parse_quant(name: str) -> tuple:
+    """Return (base_name, quant_label) from an Ollama model name string.
+
+    Examples:
+        'hermes3:8b'               -> ('hermes3:8b', '')
+        'hermes3:8b-q4_0'          -> ('hermes3:8b', 'q4_0')
+        'mistral:7b-instruct-q8_0' -> ('mistral:7b-instruct', 'q8_0')
+    """
+    m = re.search(r'-(q\d+_\d+|fp16|bf16)$', name)
+    if m:
+        return name[:m.start()], m.group(1)
+    return name, ""
+
+
+class ModelSwitcherCard(QWidget):
+    """Floating model-selection card that appears above ThinkingBar cell 0."""
+
+    model_selected = Signal(str)       # emits Ollama model name string
+    turboquant_toggled = Signal(bool)  # emits new TurboQuant enabled state
+
+    _BG    = QColor("#181818")
+    _BORDER= QColor("#2e2e2e")
+    _TEXT  = QColor("#c8c8c8")
+    _DIM   = QColor("#505050")
+    _TEAL  = QColor("#1a8272")
+    _HOVER = QColor("#222e2c")
+    _WIDTH = 260
+    _ROW_H = 26
+
+    def __init__(self, parent=None):
+        super().__init__(parent, Qt.Tool | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)
+        self.setAttribute(Qt.WA_TranslucentBackground)
+        self.setFont(QFont("Consolas", 9))
+
+        self._models: list = []
+        self._active_model: str = ""
+        self._tq_enabled: bool = False
+        self._hover_row: int = -1
+        self._rows: list = []
+
+        self._fetch_thread = OllamaFetchThread()
+        self._fetch_thread.models_ready.connect(self._on_models_ready)
+
+        QApplication.instance().installEventFilter(self)
+
+    def show_at(self, pos: QPoint, active_model: str, tq_enabled: bool):
+        self._active_model = active_model
+        self._tq_enabled = tq_enabled
+        self._models = []
+        self._rebuild()
+        self.move(pos)
+        self.show()
+        self.raise_()
+        self._fetch_thread.start()
+
+    def _on_models_ready(self, names: list):
+        self._models = sorted(names)
+        self._rebuild()
+        self.update()
+
+    def _rebuild(self):
+        """Rebuild self._rows and resize widget height."""
+        rows = []
+        rows.append(("header", "SELECT MODEL", ""))
+
+        if not self._models:
+            rows.append(("loading", "fetching models...", ""))
+        else:
+            groups = {}
+            for n in self._models:
+                base, quant = _parse_quant(n)
+                groups.setdefault(base, []).append((n, quant))
+            for base, variants in groups.items():
+                rows.append(("group", base, ""))
+                for full_name, quant in variants:
+                    rows.append(("model", full_name, quant))
+
+        rows.append(("sep", "", ""))
+        tq_label = "KV BOOST: ON " if self._tq_enabled else "KV BOOST: OFF"
+        rows.append(("turboquant", "TURBOQUANT", tq_label))
+        if self._tq_enabled:
+            rows.append(("tq_info", "~4.4x KV cache compression", ""))
+
+        self._rows = rows
+        h = len(rows) * self._ROW_H + 8
+        self.setFixedSize(self._WIDTH, h)
+
+    def paintEvent(self, _):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        rect = QRectF(0, 0, self.width(), self.height())
+
+        p.setPen(Qt.NoPen)
+        p.setBrush(self._BG)
+        p.drawRoundedRect(rect, 4, 4)
+
+        p.setPen(QPen(self._BORDER, 1))
+        p.setBrush(Qt.NoBrush)
+        p.drawRoundedRect(rect.adjusted(0.5, 0.5, -0.5, -0.5), 4, 4)
+
+        font_bold = QFont("Consolas", 9, QFont.Bold)
+        font_norm = QFont("Consolas", 9)
+        font_dim  = QFont("Consolas", 8)
+
+        y = 4
+        for i, (rtype, label, value) in enumerate(self._rows):
+            ry = y
+            rh = self._ROW_H
+
+            if rtype == "model" and i == self._hover_row:
+                p.setPen(Qt.NoPen)
+                p.setBrush(self._HOVER)
+                p.drawRect(1, ry, self._WIDTH - 2, rh)
+
+            if rtype == "turboquant" and i == self._hover_row:
+                p.setPen(Qt.NoPen)
+                p.setBrush(self._HOVER)
+                p.drawRect(1, ry, self._WIDTH - 2, rh)
+
+            if rtype == "header":
+                p.setFont(font_bold)
+                p.setPen(QPen(self._TEAL))
+                p.drawText(10, ry + 17, label)
+
+            elif rtype == "loading":
+                p.setFont(font_dim)
+                p.setPen(QPen(self._DIM))
+                p.drawText(10, ry + 17, label)
+
+            elif rtype == "group":
+                p.setFont(font_dim)
+                p.setPen(QPen(self._DIM))
+                p.drawText(10, ry + 17, label)
+
+            elif rtype == "model":
+                is_active = label == self._active_model
+                if is_active:
+                    p.setPen(QPen(self._TEAL, 2))
+                    p.drawLine(2, ry + 4, 2, ry + rh - 4)
+                p.setFont(font_norm)
+                p.setPen(QPen(self._TEAL if is_active else self._TEXT))
+                p.drawText(12, ry + 17, label)
+                if value:
+                    p.setFont(font_dim)
+                    p.setPen(QPen(self._DIM))
+                    p.drawText(self._WIDTH - 55, ry + 17, value)
+
+            elif rtype == "sep":
+                p.setPen(QPen(self._BORDER))
+                p.drawLine(8, ry + rh // 2, self._WIDTH - 8, ry + rh // 2)
+
+            elif rtype == "turboquant":
+                p.setFont(font_bold)
+                p.setPen(QPen(self._TEAL if self._tq_enabled else self._DIM))
+                p.drawText(10, ry + 17, label)
+                p.setFont(font_dim)
+                p.setPen(QPen(self._TEAL if self._tq_enabled else self._DIM))
+                p.drawText(self._WIDTH - 100, ry + 17, value)
+
+            elif rtype == "tq_info":
+                p.setFont(font_dim)
+                p.setPen(QPen(self._DIM))
+                p.drawText(10, ry + 14, label)
+
+            y += rh
+
+        p.end()
+
+    def mouseMoveEvent(self, e):
+        idx = self._row_at(e.pos().y())
+        if self._hover_row != idx:
+            self._hover_row = idx
+            self.update()
+        super().mouseMoveEvent(e)
+
+    def mousePressEvent(self, e):
+        if e.button() != Qt.LeftButton:
+            return
+        idx = self._row_at(e.pos().y())
+        if idx < 0 or idx >= len(self._rows):
+            return
+        rtype, label, _ = self._rows[idx]
+        if rtype == "model":
+            self.model_selected.emit(label)
+            self.hide()
+        elif rtype == "turboquant":
+            self._tq_enabled = not self._tq_enabled
+            self._rebuild()
+            self.update()
+            self.turboquant_toggled.emit(self._tq_enabled)
+
+    def _row_at(self, y: int) -> int:
+        row = (y - 4) // self._ROW_H
+        return row if 0 <= row < len(self._rows) else -1
+
+    def keyPressEvent(self, e):
+        if e.key() == Qt.Key_Escape:
+            self.hide()
+
+    def eventFilter(self, obj, event):
+        if self.isVisible() and event.type() == QEvent.MouseButtonPress:
+            # Use globalPosition().toPoint() for PySide6 Qt6 compatibility
+            try:
+                gpos = event.globalPosition().toPoint()
+            except AttributeError:
+                gpos = event.globalPos()
+            if not self.geometry().contains(gpos):
+                self.hide()
+        return False
+
+    def leaveEvent(self, e):
+        self._hover_row = -1
+        self.update()
 
 
 AGENT_PATH = r"C:\Users\gamer23\Desktop\hermes-agent\agent.py"

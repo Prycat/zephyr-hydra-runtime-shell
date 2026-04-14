@@ -101,3 +101,20 @@ def test_ollama_fetch_thread_emits_empty_on_error():
         thread.run()
 
     assert received == []
+
+
+def test_parse_quant_no_quant():
+    import zephyr_gui
+    assert zephyr_gui._parse_quant("hermes3:8b") == ("hermes3:8b", "")
+
+def test_parse_quant_q4():
+    import zephyr_gui
+    assert zephyr_gui._parse_quant("hermes3:8b-q4_0") == ("hermes3:8b", "q4_0")
+
+def test_parse_quant_fp16():
+    import zephyr_gui
+    assert zephyr_gui._parse_quant("llama3:70b-fp16") == ("llama3:70b", "fp16")
+
+def test_parse_quant_complex():
+    import zephyr_gui
+    assert zephyr_gui._parse_quant("mistral:7b-instruct-q8_0") == ("mistral:7b-instruct", "q8_0")
