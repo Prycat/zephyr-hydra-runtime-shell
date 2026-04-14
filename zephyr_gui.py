@@ -45,11 +45,15 @@ def _zephyr_config_path() -> str:
 
 def load_zephyr_config() -> dict:
     """Load ~/.zephyr/config.json, returning defaults for missing keys."""
+    path = _zephyr_config_path()
     try:
-        with open(_zephyr_config_path(), "r") as f:
+        with open(path, "r") as f:
             data = _json.load(f)
         return {**_CONFIG_DEFAULTS, **data}
-    except (FileNotFoundError, _json.JSONDecodeError):
+    except FileNotFoundError:
+        return dict(_CONFIG_DEFAULTS)
+    except _json.JSONDecodeError:
+        print(f"[config] warning: corrupt config at {path}, using defaults")
         return dict(_CONFIG_DEFAULTS)
 
 
@@ -57,8 +61,10 @@ def save_zephyr_config(cfg: dict) -> None:
     """Persist config dict to ~/.zephyr/config.json."""
     path = _zephyr_config_path()
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, "w") as f:
+    tmp = path + ".tmp"
+    with open(tmp, "w") as f:
         _json.dump(cfg, f, indent=2)
+    os.replace(tmp, path)
 
 
 AGENT_PATH = r"C:\Users\gamer23\Desktop\hermes-agent\agent.py"
