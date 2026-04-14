@@ -3,6 +3,7 @@ Zephyr — Prycat Research Team
 Local AI agent via Ollama with an expanding tool suite and CLI commands.
 """
 
+import sys
 import json
 import math
 import datetime
@@ -28,6 +29,13 @@ try:
     init_db()
 except ImportError:
     LOGGING = False
+
+# MCP skills bridge (MemPalace · Serena · Ruflo)
+try:
+    import tools_mcp
+    MCP_AVAILABLE = True
+except ImportError:
+    MCP_AVAILABLE = False
 
 client = OpenAI(
     base_url="http://localhost:11434/v1",
@@ -265,6 +273,10 @@ TOOL_HANDLERS = {
     "http_request":     lambda args: http_request(**args),
 }
 
+# ─── MCP skill registration ───────────────────────────────────────────────────
+if MCP_AVAILABLE:
+    tools_mcp.register_mcp_tools(TOOLS, TOOL_HANDLERS)
+
 # ─── System prompt ────────────────────────────────────────────────────────────
 
 SYSTEM_PROMPT = """You are Zephyr, a sharp AI research assistant and member of the Prycat research team.
@@ -282,6 +294,29 @@ TOOLS AVAILABLE
 - browse_url       — fetch any webpage (pass the EXACT url given, never modify it)
 - run_python       — run Python code (use httpx for HTTP — NEVER use requests)
 - http_request     — raw HTTP call to any API
+
+SKILLS (MCP-powered, use when appropriate)
+MEMORY — persistent across sessions:
+- memory_store        — save a fact, preference, or summary for later
+- memory_search       — semantic search your stored memories by topic
+- memory_list         — list recent memories
+- memory_delete       — remove a specific memory by id
+- memory_update       — update an existing memory
+
+CODE INTELLIGENCE — for reading this codebase:
+- code_overview       — list all symbols in a file (classes, functions)
+- code_find_symbol    — find a symbol by name across the project
+- code_search         — regex/pattern search across all files
+- code_read           — read a file or specific lines
+- code_references     — find all callers/users of a symbol
+- code_list_dir       — list files in a directory
+
+AGENT DELEGATION — for complex multi-step tasks:
+- agent_task          — delegate a task to a specialist agent
+- agent_search        — web access via Ruflo agent
+- agent_analyze       — analyze code or content (diff/risk analysis)
+- agent_generate      — generate content via WASM-sandboxed agent
+- agent_status        — check status of a running agent
 
 TOOL CALL RULES — follow these precisely
 1. When you decide to use a tool, call it immediately. Never paste JSON or XML tool syntax into your reply.
@@ -314,6 +349,7 @@ CLI_COMMANDS = {
     "/save":      "Save conversation to Obsidian vault — /save [filename]",
     "/clear":     "Clear conversation history",
     "/blackwell": "Enter Zephyr's planning space — he asks, you answer, he grows",
+    "/coding-blackwell": "CS-focused planning session — sharpens Zephyr's coding instincts",
     "/keys":      "Manage API keys — /keys setup | list | clear <provider>",
     "/call":      "Consult an external AI — /call [claude|gpt|grok|gemini] <message>",
     "/exit":      "Exit Zephyr",
@@ -346,6 +382,28 @@ def handle_cli(cmd: str, history: list[dict]) -> tuple[bool, list[dict]]:
             ("run_python",       "Execute Python code snippets"),
             ("http_request",     "Make raw HTTP API calls"),
         ]
+        if MCP_AVAILABLE:
+            tool_info += [
+                ("── MEMORY ──",         ""),
+                ("memory_store",         "Store a fact or summary for later"),
+                ("memory_search",        "Semantic search across stored memories"),
+                ("memory_list",          "List recent memories"),
+                ("memory_delete",        "Remove a memory by id"),
+                ("memory_update",        "Update an existing memory"),
+                ("── CODE ──",           ""),
+                ("code_overview",        "List symbols in a file"),
+                ("code_find_symbol",     "Find a symbol across the codebase"),
+                ("code_search",          "Regex search across files"),
+                ("code_read",            "Read a file or line range"),
+                ("code_references",      "Find references to a symbol"),
+                ("code_list_dir",        "List directory contents"),
+                ("── AGENTS ──",         ""),
+                ("agent_task",           "Delegate task to specialist agent"),
+                ("agent_search",         "Web access via Ruflo agent"),
+                ("agent_analyze",        "Analyze code or content"),
+                ("agent_generate",       "Generate content via WASM agent"),
+                ("agent_status",         "Check status of running agent"),
+            ]
         for name, desc in tool_info:
             print(f"  {name:<20} {desc}")
         print()
@@ -518,6 +576,19 @@ def handle_cli(cmd: str, history: list[dict]) -> tuple[bool, list[dict]]:
                     history[0]["content"] = updated_prompt
                 print("  Zephyr's world model injected into context.\n")
 
+    elif command == "/coding-blackwell":
+        if not LOGGING:
+            print("Blackwell module not available. Check blackwell/ directory.\n")
+        else:
+            from blackwell.planning import run_coding_planning_session, get_coding_world_model_context
+            run_coding_planning_session()
+            coding_context = get_coding_world_model_context()
+            if coding_context:
+                updated_prompt = SYSTEM_PROMPT + f"\n\nCODING WORLD MODEL (built from coding planning sessions):\n{coding_context}"
+                if history and history[0]["role"] == "system":
+                    history[0]["content"] = updated_prompt
+                print("  Coding world model injected into context.\n")
+
     elif command in ("/exit", "/quit"):
         print("Bye!")
         return False, history
@@ -530,7 +601,12 @@ def handle_cli(cmd: str, history: list[dict]) -> tuple[bool, list[dict]]:
 # ─── Agent loop ──────────────────────────────────────────────────────────────
 
 def run_agent(user_message: str, history: list[dict],
-              tools_called: list = None) -> tuple[str, list[dict]]:
+              tools_called: list = None,
+              stream_cb=None) -> tuple[str, list[dict]]:
+    """
+    stream_cb: optional callable(token: str) — called for each streamed text token.
+    Returns (full_reply, updated_history).
+    """
     history = history + [{"role": "user", "content": user_message}]
     while True:
         response = client.chat.completions.create(
@@ -538,35 +614,82 @@ def run_agent(user_message: str, history: list[dict],
             messages=history,
             tools=TOOLS,
             tool_choice="auto",
+            stream=True,
         )
-        msg = response.choices[0].message
-        history.append(msg.model_dump(exclude_unset=True))
-        if not msg.tool_calls:
-            return msg.content, history
-        for call in msg.tool_calls:
-            fn_name = call.function.name
-            fn_args = json.loads(call.function.arguments)
-            print(f"  [tool] {fn_name}({fn_args})")
-            if tools_called is not None:
-                tools_called.append(fn_name)
-            handler = TOOL_HANDLERS.get(fn_name)
-            result = handler(fn_args) if handler else f"Unknown tool: {fn_name}"
+
+        full_content = ""
+        tool_calls_acc: dict = {}   # index → {id, name, arguments}
+
+        for chunk in response:
+            choice = chunk.choices[0]
+            delta  = choice.delta
+
+            # ── Text token ──────────────────────────────────────
+            if delta.content:
+                full_content += delta.content
+                if stream_cb:
+                    stream_cb(delta.content)
+
+            # ── Tool-call delta ──────────────────────────────────
+            if delta.tool_calls:
+                for tc in delta.tool_calls:
+                    idx = tc.index
+                    if idx not in tool_calls_acc:
+                        tool_calls_acc[idx] = {"id": "", "name": "", "arguments": ""}
+                    if tc.id:
+                        tool_calls_acc[idx]["id"] = tc.id
+                    if tc.function:
+                        if tc.function.name:
+                            tool_calls_acc[idx]["name"] += tc.function.name
+                        if tc.function.arguments:
+                            tool_calls_acc[idx]["arguments"] += tc.function.arguments
+
+        if tool_calls_acc:
+            tool_calls_list = [
+                {
+                    "id":   tool_calls_acc[i]["id"],
+                    "type": "function",
+                    "function": {
+                        "name":      tool_calls_acc[i]["name"],
+                        "arguments": tool_calls_acc[i]["arguments"],
+                    },
+                }
+                for i in sorted(tool_calls_acc)
+            ]
             history.append({
-                "role": "tool",
-                "tool_call_id": call.id,
-                "content": str(result),
+                "role":       "assistant",
+                "content":    full_content or None,
+                "tool_calls": tool_calls_list,
             })
+            for tc_data in tool_calls_list:
+                fn_name = tc_data["function"]["name"]
+                fn_args = json.loads(tc_data["function"]["arguments"])
+                print(f"  [tool] {fn_name}({fn_args})", flush=True)
+                if tools_called is not None:
+                    tools_called.append(fn_name)
+                handler = TOOL_HANDLERS.get(fn_name)
+                result  = handler(fn_args) if handler else f"Unknown tool: {fn_name}"
+                history.append({
+                    "role":         "tool",
+                    "tool_call_id": tc_data["id"],
+                    "content":      str(result),
+                })
+            # Loop back — get the final (non-tool) reply
+        else:
+            history.append({"role": "assistant", "content": full_content})
+            return full_content, history
 
 # ─── Main ────────────────────────────────────────────────────────────────────
 
 def main():
     # ── Startup splash ────────────────────────────────────────
-    try:
-        from dragon_splash import show_splash
-        show_splash()
-    except Exception:
-        # Fallback if splash fails (e.g. no ANSI support)
-        print("Zephyr — Prycat Research Team (local via Ollama)\n")
+    # Only show splash in a real terminal — skip when piped (e.g. GUI subprocess)
+    if sys.stdout.isatty():
+        try:
+            from dragon_splash import show_splash
+            show_splash()
+        except Exception:
+            print("Zephyr — Prycat Research Team (local via Ollama)\n")
 
     print("Type /help for commands, /exit to quit.\n")
 
@@ -587,7 +710,12 @@ def main():
 
     while True:
         try:
-            user_input = input("You: ").strip()
+            # Only print the "You: " prompt in a real terminal.
+            # When running as a GUI subprocess stdout is a pipe — the prompt
+            # has no trailing newline so it gets glued onto the next print()
+            # call (e.g. a tool notification), corrupting the output.
+            _prompt = "You: " if sys.stdout.isatty() else ""
+            user_input = input(_prompt).strip()
         except (EOFError, KeyboardInterrupt):
             print("\nBye!")
             break
@@ -605,8 +733,28 @@ def main():
         # Regular chat
         try:
             tools_called = []
-            reply, history = run_agent(user_input, history, tools_called)
-            print(f"\nZephyr: {reply}\n")
+            _streaming_started = [False]
+
+            def _on_token(token: str):
+                if not _streaming_started[0]:
+                    # Emit stream-start marker on its own line so the GUI
+                    # can switch to streaming mode before the first token.
+                    print("<<ZS>>", flush=True)
+                    _streaming_started[0] = True
+                # Each token is its own line with a SOH prefix so the
+                # line-based reader in the GUI can detect it instantly.
+                sys.stdout.write(f"\x01{token}\n")
+                sys.stdout.flush()
+
+            reply, history = run_agent(user_input, history, tools_called,
+                                       stream_cb=_on_token)
+
+            if _streaming_started[0]:
+                print("<<ZE>>", flush=True)
+            else:
+                # Fallback: model returned nothing (shouldn't happen normally)
+                print(f"\nZephyr: {reply or '(no response)'}\n", flush=True)
+
             # Log to Blackwell DB
             if LOGGING and session_id:
                 turn += 1
