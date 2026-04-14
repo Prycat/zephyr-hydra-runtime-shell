@@ -733,6 +733,22 @@ class ZephyrButton(QPushButton):
         p.setPen(Qt.PenStyle.NoPen)
         p.drawEllipse(dot_x - dot_r, dot_y - dot_r, dot_r * 2, dot_r * 2)
 
+        # 11. Badge text (pair count)
+        badge = getattr(self, "_badge_text", "")
+        if badge:
+            badge_font = QFont("Consolas", 7)
+            p.setFont(badge_font)
+            p.setPen(QColor("#4dcdb4"))
+            badge_rect = self.rect().adjusted(0, 0, -6, 0)
+            p.drawText(badge_rect,
+                       Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
+                       badge)
+
+    def set_badge(self, text: str) -> None:
+        """Set a small count badge shown at the right edge of the button."""
+        self._badge_text = text
+        self.update()  # trigger repaint
+
 
 # ═══════════════════════════════════════════════════════════════
 #  ConsoleWidget
@@ -1855,6 +1871,13 @@ class PaletteWidget(QWidget):
             True,
         ),
         (
+            "/trajectory",
+            "/trajectory",
+            "Show trajectory pair counts and current regret vector.\n"
+            "Every real conversation is logged here for fine-tuning.",
+            True,
+        ),
+        (
             "/help",
             "/help",
             "Show all available commands.",
@@ -2024,7 +2047,7 @@ class PaletteWidget(QWidget):
         """)
         vbox.addWidget(hdr)
 
-        def add_group(buttons):
+        def add_group(buttons, capture=None):
             for label, cmd, tip, fire in buttons:
                 btn = ZephyrButton(label, cmd, tip, fire)
                 btn.clicked.connect(
@@ -2032,8 +2055,14 @@ class PaletteWidget(QWidget):
                         self.command_requested.emit(c, f)
                 )
                 vbox.addWidget(btn)
+                if capture is not None and cmd in capture:
+                    capture[cmd] = btn
 
-        add_group(self.BUTTONS)
+        _caps = {"/blackwell": None, "/coding-blackwell": None, "/trajectory": None}
+        add_group(self.BUTTONS, capture=_caps)
+        self._blackwell_btn  = _caps["/blackwell"]
+        self._coding_btn     = _caps["/coding-blackwell"]
+        self._trajectory_btn = _caps["/trajectory"]
         vbox.addWidget(SectionDivider("Keys"))
         add_group(self.KEYS_BUTTONS)
         vbox.addWidget(SectionDivider("External AI"))
@@ -2044,11 +2073,44 @@ class PaletteWidget(QWidget):
         add_group(self.SESSION_BUTTONS)
         vbox.addStretch()
 
+        # Live pair-count badge refresh
+        from PySide6.QtCore import QTimer
+        self._badge_timer = QTimer(self)
+        self._badge_timer.timeout.connect(self._refresh_badges)
+        self._badge_timer.start(30_000)
+        QTimer.singleShot(0, self._refresh_badges)  # immediate on startup
+
         scroll.setWidget(inner)
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
         outer.addWidget(scroll)
+
+    def _refresh_badges(self):
+        """Read JSONL line counts from disk and update button badges."""
+        try:
+            import os
+
+            def _count(path):
+                try:
+                    with open(path, encoding="utf-8") as f:
+                        return sum(1 for ln in f if ln.strip())
+                except FileNotFoundError:
+                    return 0
+
+            base = os.path.dirname(os.path.abspath(__file__))
+            bw  = _count(os.path.join(base, "blackwell", "training_pairs.jsonl"))
+            cbw = _count(os.path.join(base, "blackwell", "coding_training_pairs.jsonl"))
+            traj = _count(os.path.join(base, "trajectory_samples.jsonl"))
+
+            if self._blackwell_btn:
+                self._blackwell_btn.set_badge(f"{bw} pairs" if bw else "")
+            if self._coding_btn:
+                self._coding_btn.set_badge(f"{cbw} pairs" if cbw else "")
+            if self._trajectory_btn:
+                self._trajectory_btn.set_badge(f"{traj} pairs" if traj else "")
+        except Exception:
+            pass  # badge refresh is non-critical
 
 
 # ═══════════════════════════════════════════════════════════════
