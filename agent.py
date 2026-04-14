@@ -483,9 +483,14 @@ def handle_cli(cmd: str, history: list[dict]) -> tuple[bool, list[dict]]:
         parts_f = arg.strip().split()
         if len(parts_f) == 3 and TRAJECTORY:
             sess_f, turn_f, vote = parts_f
+            try:
+                turn_num = int(turn_f)
+            except ValueError:
+                print(f"Usage: /feedback <session_id> <turn> up|down  (turn must be a number)\n")
+                return True, history
             positive = vote.lower() in ("up", "good", "1")
-            mark_feedback(sess_f, int(turn_f), positive)
-            print(f"[feedback] {'👍' if positive else '👎'} recorded for turn {turn_f}\n")
+            mark_feedback(sess_f, turn_num, positive)
+            print(f"[feedback] {'👍' if positive else '👎'} recorded for turn {turn_num}\n")
         else:
             print("Usage: /feedback <session_id> <turn> up|down\n")
 
@@ -817,6 +822,9 @@ def main():
                 sys.stdout.write(f"\x01{token}\n")
                 sys.stdout.flush()
 
+            # Increment turn before calling run_agent so failure path
+            # and success path both record the same turn number.
+            turn += 1
             reply, history = run_agent(user_input, history, tools_called,
                                        stream_cb=_on_token)
 
@@ -827,7 +835,6 @@ def main():
                 print(f"\nZephyr: {reply or '(no response)'}\n", flush=True)
 
             # Log to Blackwell DB + trajectory
-            turn += 1
             if LOGGING and session_id:
                 exchange_id = log_exchange(session_id, turn, user_input, reply, tools_called)
                 if TRAJECTORY:
@@ -841,8 +848,8 @@ def main():
             if TRAJECTORY:
                 log_failure(
                     _gui_session,
-                    turn + 1,
-                    user_input if 'user_input' in dir() else "",
+                    turn,
+                    user_input,
                     "exception",
                     str(e),
                 )
