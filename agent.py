@@ -30,6 +30,14 @@ try:
 except ImportError:
     LOGGING = False
 
+# Trajectory logging (always-on, independent of full LOGGING)
+try:
+    from blackwell.trajectory import log_success, log_failure, mark_feedback, get_counts
+    from blackwell.background_eval import get_evaluator
+    TRAJECTORY = True
+except ImportError:
+    TRAJECTORY = False
+
 # MCP skills bridge (MemPalace · Serena · Ruflo)
 try:
     import tools_mcp
@@ -362,6 +370,8 @@ CLI_COMMANDS = {
     "/coding-blackwell": "CS-focused planning session — sharpens Zephyr's coding instincts",
     "/keys":      "Manage API keys — /keys setup | list | clear <provider>",
     "/call":      "Consult an external AI — /call [claude|gpt|grok|gemini] <message>",
+    "/trajectory": "Show trajectory pair counts and current regret vector",
+    "/feedback":   "Mark last response good/bad — /feedback <session_id> <turn> up|down",
     "/exit":      "Exit Zephyr",
 }
 
@@ -450,6 +460,34 @@ def handle_cli(cmd: str, history: list[dict]) -> tuple[bool, list[dict]]:
             print(f"Active: {MODEL}\n")
         except Exception as e:
             print(f"\nOllama: Offline ({e})\n")
+
+    elif command == "/trajectory":
+        if TRAJECTORY:
+            counts = get_counts()
+            print(f"\nTrajectory pairs:   {counts['success']} success  /  "
+                  f"{counts['failed']} failed  /  {counts['feedback']} feedback")
+        if LOGGING:
+            from blackwell.logger import get_average_vector
+            from blackwell.evaluator import total_regret
+            avg = get_average_vector()
+            if avg:
+                dims = "  ".join(f"{k}={v:.2f}" for k, v in avg.items()
+                                 if k != "n")
+                print(f"Current x\u0305:          {dims}")
+                print(f"Total regret:        {total_regret(avg):.3f}  (threshold: 0.15)")
+            else:
+                print("No scored exchanges yet — chat more to build x\u0305")
+        print()
+
+    elif command == "/feedback":
+        parts_f = arg.strip().split()
+        if len(parts_f) == 3 and TRAJECTORY:
+            sess_f, turn_f, vote = parts_f
+            positive = vote.lower() in ("up", "good", "1")
+            mark_feedback(sess_f, int(turn_f), positive)
+            print(f"[feedback] {'👍' if positive else '👎'} recorded for turn {turn_f}\n")
+        else:
+            print("Usage: /feedback <session_id> <turn> up|down\n")
 
     elif command == "/model":
         model_name = arg.strip()
@@ -736,6 +774,10 @@ def main():
     turn = 0
     if LOGGING:
         session_id = new_session(MODEL)
+    # Always emit a session ID for GUI feedback tracking
+    import uuid as _uuid
+    _gui_session = session_id if session_id else str(_uuid.uuid4())
+    print(f"<<SESSION:{_gui_session}>>", flush=True)
 
     while True:
         try:
@@ -784,13 +826,26 @@ def main():
                 # Fallback: model returned nothing (shouldn't happen normally)
                 print(f"\nZephyr: {reply or '(no response)'}\n", flush=True)
 
-            # Log to Blackwell DB
+            # Log to Blackwell DB + trajectory
+            turn += 1
             if LOGGING and session_id:
-                turn += 1
-                log_exchange(session_id, turn, user_input, reply, tools_called)
+                exchange_id = log_exchange(session_id, turn, user_input, reply, tools_called)
+                if TRAJECTORY:
+                    log_success(session_id, turn, user_input, reply, tools_called)
+                    get_evaluator().submit(exchange_id, user_input, reply)
+            elif TRAJECTORY:
+                log_success(_gui_session, turn, user_input, reply, tools_called)
         except Exception as e:
             print(f"Error: {e}\n", flush=True)
             print("<<ZE>>", flush=True)  # clear GUI loading state
+            if TRAJECTORY:
+                log_failure(
+                    _gui_session,
+                    turn + 1,
+                    user_input if 'user_input' in dir() else "",
+                    "exception",
+                    str(e),
+                )
 
 if __name__ == "__main__":
     main()
