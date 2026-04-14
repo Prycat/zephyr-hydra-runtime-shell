@@ -125,9 +125,6 @@ class ModelSwitcherCard(QWidget):
         self._hover_row: int = -1
         self._rows: list = []
 
-        self._fetch_thread = OllamaFetchThread()
-        self._fetch_thread.models_ready.connect(self._on_models_ready)
-
         QApplication.instance().installEventFilter(self)
 
     def show_at(self, pos: QPoint, active_model: str, tq_enabled: bool):
@@ -138,6 +135,9 @@ class ModelSwitcherCard(QWidget):
         self.move(pos)
         self.show()
         self.raise_()
+        # Recreate thread each time — QThread.start() is no-op after thread finishes
+        self._fetch_thread = OllamaFetchThread()
+        self._fetch_thread.models_ready.connect(self._on_models_ready)
         self._fetch_thread.start()
 
     def _on_models_ready(self, names: list):
