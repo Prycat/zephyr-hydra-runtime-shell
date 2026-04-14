@@ -11,8 +11,7 @@ import time
 
 # ── Curated tool sets ────────────────────────────────────────────────────────
 # Map: server_key → {mcp_tool_name: hermes_tool_name}
-# MemPalace and Serena names confirmed from live manifests (Task 1).
-# Ruflo names are placeholders — update after Task 3 probes live manifest.
+# All names confirmed from live manifests: MemPalace/Serena (Task 1), Ruflo (Task 3, claude-flow v3.0.0).
 
 CURATED: dict[str, dict[str, str]] = {
     "mempalace": {
