@@ -216,11 +216,15 @@ def check_training_data() -> tuple:
         bar = "#" * count
         print(f"  {dim:<14} {count:>4}  {bar}")
 
-    avg_len = sum(
-        len(r["conversations"][1]["value"].split())
-        for r in records
-        if len(r.get("conversations", [])) >= 2
-    ) // max(len(records), 1)
+    lengths = []
+    for r in records:
+        try:
+            convs = r.get("conversations", [])
+            if len(convs) >= 2:
+                lengths.append(len(convs[1]["value"].split()))
+        except (KeyError, TypeError, AttributeError):
+            continue
+    avg_len = sum(lengths) / len(lengths) if lengths else 0
     print(f"Avg Zephyr response length: {avg_len} words")
 
     rec_needed = 200 - len(records)

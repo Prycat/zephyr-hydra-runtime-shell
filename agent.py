@@ -372,6 +372,7 @@ CLI_COMMANDS = {
     "/call":      "Consult an external AI — /call [claude|gpt|grok|gemini] <message>",
     "/trajectory": "Show trajectory pair counts and current regret vector",
     "/feedback":   "Mark last response good/bad — /feedback <session_id> <turn> up|down",
+    "/run_lora": "Run LoRA training + GGUF export → registers zephyr-steered in Ollama",
     "/exit":      "Exit Zephyr",
 }
 

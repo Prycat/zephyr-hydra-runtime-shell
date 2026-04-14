@@ -53,14 +53,22 @@ def register_with_ollama(gguf_dir: str) -> bool:
         result = subprocess.run(
             ["ollama", "create", MODEL_NAME, "-f", MODELFILE_PATH],
             text=True,
+            capture_output=True,
             timeout=300,
         )
+        # Relay ollama's output through our prefix so it appears in the GUI console
+        if result.stdout:
+            for line in result.stdout.splitlines():
+                print(f"[export] {line}", flush=True)
         if result.returncode == 0:
-            print(f"[export] Model '{MODEL_NAME}' registered in Ollama!", flush=True)
+            print(f"[export] ✓ Model '{MODEL_NAME}' registered in Ollama!", flush=True)
             print(f"[export] Switch to '{MODEL_NAME}' in the model card to use your steered model.",
                   flush=True)
             return True
         else:
+            if result.stderr:
+                for line in result.stderr.splitlines():
+                    print(f"[export] stderr: {line}", flush=True)
             print(f"[export] ERROR: ollama create failed (exit code {result.returncode})",
                   flush=True)
             return False
