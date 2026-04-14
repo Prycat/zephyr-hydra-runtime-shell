@@ -364,6 +364,7 @@ def handle_cli(cmd: str, history: list[dict]) -> tuple[bool, list[dict]]:
     Handle a /command. Returns (should_continue, updated_history).
     Returns (False, history) to signal exit.
     """
+    global MODEL, client
     parts = cmd.strip().split(" ", 1)
     command = parts[0].lower()
     arg = parts[1].strip() if len(parts) > 1 else ""
@@ -445,7 +446,6 @@ def handle_cli(cmd: str, history: list[dict]) -> tuple[bool, list[dict]]:
             print(f"\nOllama: Offline ({e})\n")
 
     elif command == "/model":
-        global MODEL, client
         model_name = arg.strip()
         if model_name:
             MODEL = model_name
