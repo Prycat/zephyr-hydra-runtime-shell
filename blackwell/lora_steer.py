@@ -49,29 +49,69 @@ def check_dependencies() -> bool:
     return True
 
 
+def _load_all_pairs() -> list:
+    """Load and merge training pairs from all available sources.
+
+    Sources (all optional except training_pairs.jsonl):
+      - blackwell/training_pairs.jsonl      (Blackwell oracle pairs)
+      - blackwell/coding_training_pairs.jsonl (coding-specific pairs)
+      - trajectory_samples.jsonl             (real conversation trajectory)
+      - blackwell/synthetic_pairs.jsonl      (synthetic failure-mode pairs)
+    """
+    base_dir = os.path.dirname(__file__)
+    project_root = os.path.dirname(base_dir)
+
+    sources = [
+        TRAINING_PATH,  # blackwell/training_pairs.jsonl (existing constant)
+        os.path.join(base_dir, "coding_training_pairs.jsonl"),
+        os.path.join(project_root, "trajectory_samples.jsonl"),
+        os.path.join(base_dir, "synthetic_pairs.jsonl"),
+    ]
+
+    all_records = []
+    for src in sources:
+        if not os.path.exists(src):
+            continue
+        count_before = len(all_records)
+        with open(src, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    obj = json.loads(line)
+                    if obj.get("conversations") and len(obj["conversations"]) >= 2:
+                        all_records.append(obj)
+                except (json.JSONDecodeError, KeyError):
+                    pass
+        added = len(all_records) - count_before
+        if added:
+            print(f"  [data] {os.path.basename(src)}: {added} pairs", flush=True)
+
+    return all_records
+
+
 def load_training_data():
     """Load and format training pairs for SFTTrainer."""
     from datasets import Dataset
 
-    if not os.path.exists(TRAINING_PATH):
-        raise FileNotFoundError(f"No training data at {TRAINING_PATH}. Run run_oracle.py first.")
+    all_objs = _load_all_pairs()
+    if not all_objs:
+        raise FileNotFoundError(
+            f"No training data found. Run: python blackwell/data_generator.py"
+        )
 
     records = []
-    with open(TRAINING_PATH, "r", encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if not line:
-                continue
-            obj = json.loads(line)
-            convos = obj.get("conversations", [])
-            if len(convos) >= 2:
-                records.append({
-                    "human":  convos[0]["value"],
-                    "zephyr": convos[1]["value"],
-                    "dim":    obj.get("target_dim", "unknown"),
-                })
+    for obj in all_objs:
+        convos = obj.get("conversations", [])
+        if len(convos) >= 2:
+            records.append({
+                "human":  convos[0]["value"],
+                "zephyr": convos[1]["value"],
+                "dim":    obj.get("target_dim", "unknown"),
+            })
 
-    print(f"Loaded {len(records)} training pairs")
+    print(f"Loaded {len(records)} training pairs total", flush=True)
 
     # Format as instruction-following
     def format_row(row):
@@ -193,21 +233,17 @@ def check_training_data() -> tuple:
     (ok: bool, message: str)
         ok is True when there are enough pairs to train (>=200).
     """
-    if not os.path.exists(TRAINING_PATH):
-        msg = f"No training data yet at {TRAINING_PATH}. Run: python run_oracle.py"
+    records_raw = _load_all_pairs()
+    if not records_raw:
+        msg = f"No training data yet. Run: python run_oracle.py"
         print(msg)
         return False, msg
 
-    records = []
+    records = records_raw
     dim_counts = {}
-    with open(TRAINING_PATH, "r", encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if line:
-                obj = json.loads(line)
-                records.append(obj)
-                dim = obj.get("target_dim", "unknown")
-                dim_counts[dim] = dim_counts.get(dim, 0) + 1
+    for obj in records:
+        dim = obj.get("target_dim", "unknown")
+        dim_counts[dim] = dim_counts.get(dim, 0) + 1
 
     print(f"\n=== Training Data Report ===")
     print(f"Total pairs : {len(records)}")
