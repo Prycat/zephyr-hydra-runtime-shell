@@ -865,10 +865,18 @@ class ConsoleWidget(QPlainTextEdit):
         if self._auto_scroll:
             self.verticalScrollBar().setValue(self.verticalScrollBar().maximum())
 
+    # Line prefixes that are internal noise — never shown to the user
+    _MUTED_PREFIXES = (
+        "<<SESSION:",
+        "[tools_mcp]",
+        "[mcp]",
+        "[mcp_thread]",
+    )
+
     def append_line(self, line: str):
         """Colorize and append one line from the agent."""
-        # Silently consume protocol markers that should not render
-        if line.startswith("<<SESSION:") and line.endswith(">>"):
+        # Silently consume protocol markers and MCP internal noise
+        if any(line.startswith(p) for p in self._MUTED_PREFIXES):
             return
         # ── Streaming protocol ────────────────────────────────
         if line == "<<ZS>>":
@@ -2294,12 +2302,15 @@ class MainWindow(QMainWindow):
         """Show thumbs feedback bar briefly after each response."""
         if not self._current_session_id:
             return
-        bar = FeedbackBar(parent=self._console)
+        # Must parent to viewport() — QPlainTextEdit's visible area is a child
+        # viewport widget; widgets parented to the scroll-area frame are hidden behind it.
+        vp = self._console.viewport()
+        bar = FeedbackBar(parent=vp)
         bar.feedback_given.connect(self._on_feedback)
-        # Position bottom-right of console
+        # Position bottom-right of the viewport
         bar.adjustSize()
-        x = self._console.width() - bar.width() - 8
-        y = self._console.height() - bar.height() - 4
+        x = vp.width() - bar.width() - 8
+        y = vp.height() - bar.height() - 4
         bar.move(x, y)
         bar.show()
         bar.raise_()
