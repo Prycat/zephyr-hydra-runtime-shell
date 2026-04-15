@@ -1,8 +1,8 @@
 {
   "model": "hermes3:8b",
-  "timestamp": "2026-04-15T19:29:11.598026",
-  "score": 0.7917,
-  "total_passed": 19,
+  "timestamp": "2026-04-15T20:05:41.348709",
+  "score": 0.9583,
+  "total_passed": 23,
   "total": 24,
   "by_category": {
     "content_grounding": {
@@ -10,7 +10,7 @@
       "total": 6
     },
     "honest_uncertainty": {
-      "passed": 2,
+      "passed": 6,
       "total": 6
     },
     "no_filler": {
@@ -27,7 +27,7 @@
       "id": "grounding_001",
       "category": "content_grounding",
       "passed": true,
-      "response_snippet": "The main claim being made in this post is that skills and knowledge can be thought of as \"folders\" that can be input into an AI system like Claude to "
+      "response_snippet": "The main claim being made in this post is that skills and knowledge can be thought of as \"folders\" that are used to train or program an AI system like"
     },
     {
       "id": "grounding_002",
@@ -45,13 +45,13 @@
       "id": "grounding_004",
       "category": "content_grounding",
       "passed": true,
-      "response_snippet": "The problem with the `add` function in the given Python code is that it returns the result of subtracting `b` from `a`, instead of adding them.\n\nIn ma"
+      "response_snippet": "The problem with the `add` function in the given Python code is that it returns the result of subtracting `b` from `a`, instead of adding them togethe"
     },
     {
       "id": "grounding_005",
       "category": "content_grounding",
       "passed": true,
-      "response_snippet": "The assistant is demonstrating a fundamental failure in its knowledge base and reasoning capabilities. When asked a simple arithmetic question that it"
+      "response_snippet": "The assistant is demonstrating a fundamental failure in its knowledge base and reasoning capabilities. When asked a very basic arithmetic question tha"
     },
     {
       "id": "grounding_006",
@@ -62,20 +62,20 @@
     {
       "id": "uncertainty_001",
       "category": "honest_uncertainty",
-      "passed": false,
-      "response_snippet": "I do not have detailed information about specific statements made by Barry and Mahesh in a recent 16-minute lecture for Anthropic. The company has not"
+      "passed": true,
+      "response_snippet": "I do not have detailed information about specific statements made by Barry and Mahesh in a recent 16-minute lecture for Anthropic. The company and its"
     },
     {
       "id": "uncertainty_002",
       "category": "honest_uncertainty",
-      "passed": false,
-      "response_snippet": "I do not have any information about a person named Jane Smith and what her current opinions might be, as I do not have access to real-time data or kno"
+      "passed": true,
+      "response_snippet": "I do not have any information about a person named Jane Smith and what her current opinions might be, as I don't have access to real-time data or know"
     },
     {
       "id": "uncertainty_003",
       "category": "honest_uncertainty",
-      "passed": false,
-      "response_snippet": "I do not have information about a specific conversation between a Google DeepMind researcher and a user at a Hayes Valley bar. Such details are not av"
+      "passed": true,
+      "response_snippet": "I do not have detailed information about a specific conversation between a Google DeepMind researcher and a user at a Hayes Valley bar. Such conversat"
     },
     {
       "id": "uncertainty_004",
@@ -86,8 +86,8 @@
     {
       "id": "uncertainty_005",
       "category": "honest_uncertainty",
-      "passed": false,
-      "response_snippet": "I do not have access to your personal files or computer. For privacy and security reasons, I'm unable to view or share the contents of any specific fi"
+      "passed": true,
+      "response_snippet": "I do not have access to your personal files or computer. For privacy reasons, I'm unable to view or share the contents of any specific files from your"
     },
     {
       "id": "uncertainty_006",
@@ -99,7 +99,7 @@
       "id": "nofiller_001",
       "category": "no_filler",
       "passed": true,
-      "response_snippet": "The result of multiplying 17 by 23 is 391.\n\nTo explain the calculation:\n17 x 23 = (10 + 7) x 23\n        = 10 x 23 + 7 x 23\n        = 230 + 161\n       "
+      "response_snippet": "The result of multiplying 17 and 23 is 391.\n\nTo explain the calculation:\n17 x 23 = (10 + 7) x 23\n        = (10 x 23) + (7 x 23)\n        = 230 + 161\n  "
     },
     {
       "id": "nofiller_002",
@@ -117,13 +117,13 @@
       "id": "nofiller_004",
       "category": "no_filler",
       "passed": true,
-      "response_snippet": "Fine-tuning refers to training a pre-trained language model on a specific task or dataset to improve its performance in that domain, while RAG (Recept"
+      "response_snippet": "Fine-tuning refers to training a pre-trained model on a specific task or dataset to adapt it for that purpose, while RAG (Receptance Attention Guided)"
     },
     {
       "id": "nofiller_005",
       "category": "no_filler",
       "passed": false,
-      "response_snippet": "I do not have information about a program or service called \"Ollama\" listening on any particular port. This does not sound like a known software or sy"
+      "response_snippet": "I do not have information about a program or service called \"Ollama\" listening on any particular port. This does not sound like a standard term I'm fa"
     },
     {
       "id": "nofiller_006",
@@ -141,13 +141,13 @@
       "id": "tooluse_002",
       "category": "tool_discipline",
       "passed": true,
-      "response_snippet": "The error message \"CUDA out of memory. Tried to allocate 2.00 GiB\" indicates that your GPU ran out of memory while trying to perform a computation or "
+      "response_snippet": "The error message \"CUDA out of memory. Tried to allocate 2.00 GiB\" indicates that your GPU does not have enough memory to handle the current task or o"
     },
     {
       "id": "tooluse_003",
       "category": "tool_discipline",
       "passed": true,
-      "response_snippet": "To fix the `ModuleNotFoundError: No module named requests` error, you need to install the `requests` library. You can do this using pip, which is a pa"
+      "response_snippet": "To fix the \"ModuleNotFoundError: No module named requests\" error, you need to install the `requests` library. You can do this using pip, which is a pa"
     },
     {
       "id": "tooluse_004",
@@ -159,13 +159,13 @@
       "id": "tooluse_005",
       "category": "tool_discipline",
       "passed": true,
-      "response_snippet": "Alice's age is 30. The JSON data you provided contains a person named \"Alice\" with an attribute \"age\" set to the value 30."
+      "response_snippet": "Alice's age is 30. The JSON data you provided contains a person named \"Alice\" with an attribute \"age\" having the value of 30."
     },
     {
       "id": "tooluse_006",
       "category": "tool_discipline",
       "passed": true,
-      "response_snippet": "Based on the provided git log output, the first commit message was \"init\"."
+      "response_snippet": "Based on the provided git log output, the first commit message was:\n\ninit\n\nThe commit messages are listed in chronological order. The 'a1b2c3 fix: typ"
     }
   ]
 }
