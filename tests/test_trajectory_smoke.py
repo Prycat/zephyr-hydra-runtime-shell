@@ -150,3 +150,10 @@ def test_end_to_end_pipeline(tmp_path, monkeypatch):
     assert len(feedbacks) == 1
     assert feedbacks[0]["positive"] is False
     assert feedbacks[0]["turn"] == 1
+
+
+def test_oracle_timeout_does_not_block(tmp_path, monkeypatch):
+    """Oracle synthesise() hanging must not block the evaluator thread."""
+    from blackwell import background_eval
+    assert background_eval.ORACLE_REGRET_THRESHOLD == 0.25
+    assert background_eval.ORACLE_TIMEOUT_SECONDS == 8
