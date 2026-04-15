@@ -23,14 +23,16 @@ def _call_synthesise_with_timeout(
         from blackwell.oracle import synthesise
         synthesise(avg, steering_v, allocation, n_pairs=n_pairs)
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ex:
-        fut = ex.submit(_work)
-        try:
-            fut.result(timeout=timeout)
-        except concurrent.futures.TimeoutError:
-            print(f"[oracle] timed out after {timeout}s — skipping synthesis", flush=True)
-        except Exception as e:
-            print(f"[oracle] synthesis error: {e}", flush=True)
+    ex = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+    fut = ex.submit(_work)
+    try:
+        fut.result(timeout=timeout)
+    except concurrent.futures.TimeoutError:
+        print(f"[oracle] timed out after {timeout}s — skipping synthesis", flush=True)
+    except Exception as e:
+        print(f"[oracle] synthesis error: {e}", flush=True)
+    finally:
+        ex.shutdown(wait=False)  # don't block waiting for the thread to finish
 
 
 def _maybe_trigger_oracle(threshold: float) -> None:
@@ -59,7 +61,10 @@ def _maybe_trigger_oracle(threshold: float) -> None:
 
 
 class BackgroundEvaluator:
-    """Daemon thread that scores exchange turns asynchronously."""
+    """
+    Daemon thread that scores exchange turns asynchronously.
+    Call submit() from the main agent thread; scoring happens in background.
+    """
 
     def __init__(self, regret_threshold: float = ORACLE_REGRET_THRESHOLD):
         self._q = queue.Queue()
@@ -100,7 +105,11 @@ _evaluator_lock = threading.Lock()
 
 
 def get_evaluator() -> "BackgroundEvaluator":
-    """Return the singleton BackgroundEvaluator (double-checked locking)."""
+    """Return the singleton BackgroundEvaluator, creating it on first call.
+
+    Uses double-checked locking to avoid a race condition when multiple
+    threads call get_evaluator() simultaneously before the instance exists.
+    """
     global _evaluator
     if _evaluator is None:
         with _evaluator_lock:
