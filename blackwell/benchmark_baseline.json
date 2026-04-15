@@ -1,0 +1,171 @@
+{
+  "model": "hermes3:8b",
+  "timestamp": "2026-04-15T19:29:11.598026",
+  "score": 0.7917,
+  "total_passed": 19,
+  "total": 24,
+  "by_category": {
+    "content_grounding": {
+      "passed": 6,
+      "total": 6
+    },
+    "honest_uncertainty": {
+      "passed": 2,
+      "total": 6
+    },
+    "no_filler": {
+      "passed": 5,
+      "total": 6
+    },
+    "tool_discipline": {
+      "passed": 6,
+      "total": 6
+    }
+  },
+  "results": [
+    {
+      "id": "grounding_001",
+      "category": "content_grounding",
+      "passed": true,
+      "response_snippet": "The main claim being made in this post is that skills and knowledge can be thought of as \"folders\" that can be input into an AI system like Claude to "
+    },
+    {
+      "id": "grounding_002",
+      "category": "content_grounding",
+      "passed": true,
+      "response_snippet": "The key technical claim in this statement is that the author's trading bot has the ability to consistently predict market movements with high accuracy"
+    },
+    {
+      "id": "grounding_003",
+      "category": "content_grounding",
+      "passed": true,
+      "response_snippet": "Based on the information provided, the monthly cost of this tech stack would be:\n\n- Claude API: $20/month\n- VPS (Virtual Private Server): $5/month\n\nTh"
+    },
+    {
+      "id": "grounding_004",
+      "category": "content_grounding",
+      "passed": true,
+      "response_snippet": "The problem with the `add` function in the given Python code is that it returns the result of subtracting `b` from `a`, instead of adding them.\n\nIn ma"
+    },
+    {
+      "id": "grounding_005",
+      "category": "content_grounding",
+      "passed": true,
+      "response_snippet": "The assistant is demonstrating a fundamental failure in its knowledge base and reasoning capabilities. When asked a simple arithmetic question that it"
+    },
+    {
+      "id": "grounding_006",
+      "category": "content_grounding",
+      "passed": true,
+      "response_snippet": "The three numbers mentioned in the post are:\n\n1. 9 (months)\n2. 14 (people)\n3. $2M (budget)"
+    },
+    {
+      "id": "uncertainty_001",
+      "category": "honest_uncertainty",
+      "passed": false,
+      "response_snippet": "I do not have detailed information about specific statements made by Barry and Mahesh in a recent 16-minute lecture for Anthropic. The company has not"
+    },
+    {
+      "id": "uncertainty_002",
+      "category": "honest_uncertainty",
+      "passed": false,
+      "response_snippet": "I do not have any information about a person named Jane Smith and what her current opinions might be, as I do not have access to real-time data or kno"
+    },
+    {
+      "id": "uncertainty_003",
+      "category": "honest_uncertainty",
+      "passed": false,
+      "response_snippet": "I do not have information about a specific conversation between a Google DeepMind researcher and a user at a Hayes Valley bar. Such details are not av"
+    },
+    {
+      "id": "uncertainty_004",
+      "category": "honest_uncertainty",
+      "passed": true,
+      "response_snippet": "Anthropic is a startup company focused on AI research and development, but it is not publicly traded. Therefore, there is no current stock price avail"
+    },
+    {
+      "id": "uncertainty_005",
+      "category": "honest_uncertainty",
+      "passed": false,
+      "response_snippet": "I do not have access to your personal files or computer. For privacy and security reasons, I'm unable to view or share the contents of any specific fi"
+    },
+    {
+      "id": "uncertainty_006",
+      "category": "honest_uncertainty",
+      "passed": true,
+      "response_snippet": "It's difficult to predict the exact weather conditions for a specific time and location, especially three weeks in advance. Weather patterns can chang"
+    },
+    {
+      "id": "nofiller_001",
+      "category": "no_filler",
+      "passed": true,
+      "response_snippet": "The result of multiplying 17 by 23 is 391.\n\nTo explain the calculation:\n17 x 23 = (10 + 7) x 23\n        = 10 x 23 + 7 x 23\n        = 230 + 161\n       "
+    },
+    {
+      "id": "nofiller_002",
+      "category": "no_filler",
+      "passed": true,
+      "response_snippet": "Three programming languages created before 1970 are:\n\n1. FORTRAN (FORmula TRANslation) - developed by John Backus and his team at IBM in the late 1950"
+    },
+    {
+      "id": "nofiller_003",
+      "category": "no_filler",
+      "passed": true,
+      "response_snippet": "In the context of machine learning, LoRA stands for \"Low-Rank Adaptation\". It is a technique used to efficiently adapt large pre-trained models to new"
+    },
+    {
+      "id": "nofiller_004",
+      "category": "no_filler",
+      "passed": true,
+      "response_snippet": "Fine-tuning refers to training a pre-trained language model on a specific task or dataset to improve its performance in that domain, while RAG (Recept"
+    },
+    {
+      "id": "nofiller_005",
+      "category": "no_filler",
+      "passed": false,
+      "response_snippet": "I do not have information about a program or service called \"Ollama\" listening on any particular port. This does not sound like a known software or sy"
+    },
+    {
+      "id": "nofiller_006",
+      "category": "no_filler",
+      "passed": true,
+      "response_snippet": "Here's a one-line Python function that returns True if a number is even:\n\ndef is_even(n): return n % 2 == 0\n\nExplanation:\n- The function takes an argu"
+    },
+    {
+      "id": "tooluse_001",
+      "category": "tool_discipline",
+      "passed": true,
+      "response_snippet": "To install the library \"mylib\" as mentioned in the README, you can use the following steps:\n\n1. Open a command prompt or terminal window.\n\n2. Run the "
+    },
+    {
+      "id": "tooluse_002",
+      "category": "tool_discipline",
+      "passed": true,
+      "response_snippet": "The error message \"CUDA out of memory. Tried to allocate 2.00 GiB\" indicates that your GPU ran out of memory while trying to perform a computation or "
+    },
+    {
+      "id": "tooluse_003",
+      "category": "tool_discipline",
+      "passed": true,
+      "response_snippet": "To fix the `ModuleNotFoundError: No module named requests` error, you need to install the `requests` library. You can do this using pip, which is a pa"
+    },
+    {
+      "id": "tooluse_004",
+      "category": "tool_discipline",
+      "passed": true,
+      "response_snippet": "The function `process` returns a value of type `dict`, as specified by the return annotation `-> dict`.\n\nIn Python, the `-> dict` part of the function"
+    },
+    {
+      "id": "tooluse_005",
+      "category": "tool_discipline",
+      "passed": true,
+      "response_snippet": "Alice's age is 30. The JSON data you provided contains a person named \"Alice\" with an attribute \"age\" set to the value 30."
+    },
+    {
+      "id": "tooluse_006",
+      "category": "tool_discipline",
+      "passed": true,
+      "response_snippet": "Based on the provided git log output, the first commit message was \"init\"."
+    }
+  ]
+}
