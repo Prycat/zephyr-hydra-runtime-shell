@@ -1,0 +1,8 @@
+# Core CLI dependencies
+ddgs
+beautifulsoup4
+openai
+httpx
+requests
+anthropic
+google-generativeai

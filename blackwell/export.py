@@ -6,22 +6,39 @@ Pipeline:
   GGUF directory (from lora_steer.py save_pretrained_gguf)
     → find .gguf file
     → write Ollama Modelfile
-    → run: ollama create zephyr-steered -f Modelfile
+    → run: ollama create prycat -f Modelfile
     → print progress lines for the GUI console
 """
 import os
 import glob
+import json
 import subprocess
 
-MODEL_NAME = "zephyr-steered"
+MODEL_NAME = "prycat"
 _HERE = os.path.dirname(os.path.abspath(__file__))
 MODELFILE_PATH = os.path.join(_HERE, "Modelfile")
+_REGISTERED_PATH = os.path.join(_HERE, "adapters", "registered.json")
+
+
+def _record_registered(model_name: str):
+    """Append model_name to adapters/registered.json so the GUI can badge it."""
+    try:
+        existing = []
+        if os.path.exists(_REGISTERED_PATH):
+            with open(_REGISTERED_PATH, "r", encoding="utf-8") as f:
+                existing = json.load(f).get("models", [])
+        if model_name not in existing:
+            existing.append(model_name)
+        with open(_REGISTERED_PATH, "w", encoding="utf-8") as f:
+            json.dump({"models": existing}, f, indent=2)
+    except Exception as e:
+        print(f"[export] WARNING: could not write registered.json: {e}", flush=True)
 
 
 def register_with_ollama(gguf_dir: str) -> bool:
     """
     Given a directory containing a .gguf file, write a Modelfile
-    and run `ollama create zephyr-steered`.
+    and run `ollama create prycat`.
     Returns True on success, False on any failure.
     Prints progress lines to stdout for the GUI console.
     """
@@ -64,6 +81,7 @@ def register_with_ollama(gguf_dir: str) -> bool:
             print(f"[export] ✓ Model '{MODEL_NAME}' registered in Ollama!", flush=True)
             print(f"[export] Switch to '{MODEL_NAME}' in the model card to use your steered model.",
                   flush=True)
+            _record_registered(MODEL_NAME)
             return True
         else:
             if result.stderr:

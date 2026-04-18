@@ -32,11 +32,13 @@ from PySide6.QtGui import (
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout,
     QHBoxLayout, QPlainTextEdit, QLineEdit, QPushButton,
-    QSplitter, QScrollArea, QLabel, QSizePolicy, QFrame
+    QSplitter, QScrollArea, QLabel, QSizePolicy, QFrame,
+    QCheckBox, QSlider,
 )
 
 _CONFIG_DEFAULTS = {
     "active_model": "hermes3:8b",
+    "oracle_model": "hermes3:8b",
     "turboquant_enabled": False,
 }
 
@@ -73,7 +75,7 @@ class OllamaFetchThread(QThread):
     """Fetches available Ollama models in background. Emits list of name strings."""
     models_ready = Signal(list)  # list[str]
 
-    _URL = "http://localhost:11434/api/tags"
+    _URL = __import__("config").OLLAMA_TAGS_URL
 
     def run(self):
         try:
@@ -83,6 +85,67 @@ class OllamaFetchThread(QThread):
         except Exception:
             names = []
         self.models_ready.emit(names)
+
+
+class OllamaPullThread(QThread):
+    """Runs `ollama pull <model>` and streams status lines to the GUI."""
+    line_ready   = Signal(str)   # human-readable progress line
+    pull_done    = Signal(bool)  # True = success, False = error
+
+    def __init__(self, model: str, parent=None):
+        super().__init__(parent)
+        self._model = model
+
+    def run(self):
+        import subprocess, json as _j
+        try:
+            proc = subprocess.Popen(
+                ["ollama", "pull", self._model],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+            )
+            for raw in proc.stdout:
+                raw = raw.strip()
+                if not raw:
+                    continue
+                # ollama pull emits JSON lines — parse for a clean display
+                try:
+                    obj = _j.loads(raw)
+                    status = obj.get("status", "")
+                    total  = obj.get("total", 0)
+                    done   = obj.get("completed", 0)
+                    if total and done:
+                        pct = int(done / total * 100)
+                        line = f"{status}  {pct}%"
+                    else:
+                        line = status
+                except Exception:
+                    line = raw
+                if line:
+                    self.line_ready.emit(line)
+            proc.wait()
+            self.pull_done.emit(proc.returncode == 0)
+        except FileNotFoundError:
+            self.line_ready.emit("ERROR: 'ollama' not found in PATH")
+            self.pull_done.emit(False)
+        except Exception as e:
+            self.line_ready.emit(f"ERROR: {e}")
+            self.pull_done.emit(False)
+
+
+def _local_trained_models() -> set:
+    """Return set of model names registered by a local BlackLoRA-N training run."""
+    try:
+        import json as _j
+        path = os.path.join(
+            os.path.dirname(os.path.abspath(__file__)),
+            "blackwell", "adapters", "registered.json"
+        )
+        with open(path, "r", encoding="utf-8") as f:
+            return set(_j.load(f).get("models", []))
+    except Exception:
+        return set()
 
 
 def _parse_quant(name: str) -> tuple:
@@ -99,11 +162,182 @@ def _parse_quant(name: str) -> tuple:
     return name, ""
 
 
+# ═══════════════════════════════════════════════════════════════
+#  ModelDownloadCard — pull any Ollama/HuggingFace model
+# ═══════════════════════════════════════════════════════════════
+class ModelDownloadCard(QWidget):
+    """Floating card for pulling a model from Ollama library or hf.co/."""
+
+    download_complete = Signal()   # emitted on successful pull
+
+    _BG     = QColor("#181818")
+    _BORDER = QColor("#2e2e2e")
+    _TEXT   = QColor("#c8c8c8")
+    _DIM    = QColor("#505050")
+    _TEAL   = QColor("#1a8272")
+    _WIDTH  = 360
+
+    def __init__(self, parent=None):
+        super().__init__(parent, Qt.Tool | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)
+        self.setAttribute(Qt.WA_TranslucentBackground)
+        self.setFont(QFont("Consolas", 9))
+        self._thread = None
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(12, 10, 12, 10)
+        layout.setSpacing(6)
+
+        # Header
+        header = QLabel("ADD MODEL")
+        header.setFont(QFont("Consolas", 9, QFont.Bold))
+        header.setStyleSheet(f"color: {self._TEAL.name()}; background: transparent;")
+        layout.addWidget(header)
+
+        hint = QLabel("ollama:  llama3.2:3b\nhf.co:   hf.co/bartowski/Llama-3.2-3B-Instruct-GGUF")
+        hint.setFont(QFont("Consolas", 8))
+        hint.setStyleSheet(f"color: {self._DIM.name()}; background: transparent;")
+        layout.addWidget(hint)
+
+        # Input row
+        input_row = QHBoxLayout()
+        input_row.setSpacing(6)
+        self._input = QLineEdit()
+        self._input.setPlaceholderText("model name or hf.co/user/repo")
+        self._input.setFont(QFont("Consolas", 9))
+        self._input.setStyleSheet(f"""
+            QLineEdit {{
+                background: #111111;
+                color: {self._TEXT.name()};
+                border: 1px solid {self._BORDER.name()};
+                border-radius: 3px;
+                padding: 3px 6px;
+            }}
+            QLineEdit:focus {{
+                border: 1px solid {self._TEAL.name()};
+            }}
+        """)
+        self._input.returnPressed.connect(self._start_pull)
+        input_row.addWidget(self._input)
+
+        self._pull_btn = QPushButton("PULL")
+        self._pull_btn.setFont(QFont("Consolas", 9, QFont.Bold))
+        self._pull_btn.setFixedWidth(52)
+        self._pull_btn.setCursor(Qt.PointingHandCursor)
+        self._pull_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: {self._TEAL.name()};
+                color: #111;
+                border: none;
+                border-radius: 3px;
+                padding: 4px 8px;
+            }}
+            QPushButton:hover {{ background: #22a090; }}
+            QPushButton:disabled {{ background: {self._BORDER.name()}; color: {self._DIM.name()}; }}
+        """)
+        self._pull_btn.clicked.connect(self._start_pull)
+        input_row.addWidget(self._pull_btn)
+        layout.addLayout(input_row)
+
+        # Progress log
+        self._log = QPlainTextEdit()
+        self._log.setReadOnly(True)
+        self._log.setFont(QFont("Consolas", 8))
+        self._log.setFixedHeight(110)
+        self._log.setStyleSheet(f"""
+            QPlainTextEdit {{
+                background: #0e0e0e;
+                color: {self._TEXT.name()};
+                border: 1px solid {self._BORDER.name()};
+                border-radius: 3px;
+            }}
+        """)
+        layout.addWidget(self._log)
+
+        self.setFixedWidth(self._WIDTH)
+        self.adjustSize()
+
+        QApplication.instance().installEventFilter(self)
+
+    def show_at(self, pos: QPoint):
+        self._input.clear()
+        self._log.clear()
+        self._pull_btn.setEnabled(True)
+        self.move(pos)
+        self.show()
+        self.raise_()
+        self._input.setFocus()
+        self.activateWindow()
+
+    def _start_pull(self):
+        model = self._input.text().strip()
+        if not model:
+            return
+        self._pull_btn.setEnabled(False)
+        self._log.clear()
+        self._log.appendPlainText(f"pulling {model}...")
+        self._thread = OllamaPullThread(model)
+        self._thread.line_ready.connect(self._on_line)
+        self._thread.pull_done.connect(self._on_done)
+        self._thread.start()
+
+    def _on_line(self, line: str):
+        # Replace last line if it's a progress update (ends with %)
+        cursor = self._log.textCursor()
+        cursor.movePosition(QTextCursor.End)
+        text = self._log.toPlainText()
+        last_nl = text.rfind("\n")
+        last_line = text[last_nl + 1:] if last_nl >= 0 else text
+        if last_line.endswith("%") and line.endswith("%"):
+            # overwrite the last progress line in place
+            cursor.movePosition(QTextCursor.StartOfBlock, QTextCursor.KeepAnchor)
+            cursor.removeSelectedText()
+            cursor.insertText(line)
+        else:
+            self._log.appendPlainText(line)
+        self._log.ensureCursorVisible()
+
+    def _on_done(self, success: bool):
+        self._pull_btn.setEnabled(True)
+        if success:
+            self._log.appendPlainText("✓ done — model ready")
+            self.download_complete.emit()
+            QTimer.singleShot(1800, self.hide)
+        else:
+            self._log.appendPlainText("✗ pull failed — check model name")
+
+    def keyPressEvent(self, e):
+        if e.key() == Qt.Key_Escape:
+            self.hide()
+
+    def eventFilter(self, obj, event):
+        if self.isVisible() and event.type() == QEvent.MouseButtonPress:
+            try:
+                gpos = event.globalPosition().toPoint()
+            except AttributeError:
+                gpos = event.globalPos()
+            if not self.geometry().contains(gpos):
+                self.hide()
+        return False
+
+    def paintEvent(self, _):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        rect = QRectF(0, 0, self.width(), self.height())
+        p.setPen(Qt.NoPen)
+        p.setBrush(self._BG)
+        p.drawRoundedRect(rect, 4, 4)
+        p.setPen(QPen(self._BORDER, 1))
+        p.setBrush(Qt.NoBrush)
+        p.drawRoundedRect(rect.adjusted(0.5, 0.5, -0.5, -0.5), 4, 4)
+        p.end()
+
+
 class ModelSwitcherCard(QWidget):
     """Floating model-selection card that appears above ThinkingBar cell 0."""
 
     model_selected = Signal(str)       # emits Ollama model name string
     turboquant_toggled = Signal(bool)  # emits new TurboQuant enabled state
+    add_model_clicked = Signal()       # opens ModelDownloadCard
 
     _BG    = QColor("#181818")
     _BORDER= QColor("#2e2e2e")
@@ -149,6 +383,7 @@ class ModelSwitcherCard(QWidget):
 
     def _rebuild(self):
         """Rebuild self._rows and resize widget height."""
+        trained = _local_trained_models()
         rows = []
         rows.append(("header", "SELECT MODEL", ""))
 
@@ -162,13 +397,16 @@ class ModelSwitcherCard(QWidget):
             for base, variants in groups.items():
                 rows.append(("group", base, ""))
                 for full_name, quant in variants:
-                    rows.append(("model", full_name, quant))
+                    badge = "★ local" if full_name in trained else quant
+                    rows.append(("model", full_name, badge))
 
         rows.append(("sep", "", ""))
         tq_label = "KV BOOST: ON " if self._tq_enabled else "KV BOOST: OFF"
         rows.append(("turboquant", "TURBOQUANT", tq_label))
         if self._tq_enabled:
             rows.append(("tq_info", "~4.4x KV cache compression", ""))
+        rows.append(("sep", "", ""))
+        rows.append(("add", "+ ADD MODEL", ""))
 
         self._rows = rows
         h = len(rows) * self._ROW_H + 8
@@ -251,6 +489,15 @@ class ModelSwitcherCard(QWidget):
                 p.setPen(QPen(self._DIM))
                 p.drawText(10, ry + 14, label)
 
+            elif rtype == "add":
+                if i == self._hover_row:
+                    p.setPen(Qt.NoPen)
+                    p.setBrush(self._HOVER)
+                    p.drawRect(1, ry, self._WIDTH - 2, rh)
+                p.setFont(font_bold)
+                p.setPen(QPen(self._TEAL))
+                p.drawText(10, ry + 17, label)
+
             y += rh
 
         p.end()
@@ -277,6 +524,9 @@ class ModelSwitcherCard(QWidget):
             self._rebuild()
             self.update()
             self.turboquant_toggled.emit(self._tq_enabled)
+        elif rtype == "add":
+            self.hide()
+            self.add_model_clicked.emit()
 
     def _row_at(self, y: int) -> int:
         row = (y - 4) // self._ROW_H
@@ -300,6 +550,628 @@ class ModelSwitcherCard(QWidget):
     def leaveEvent(self, e):
         self._hover_row = -1
         self.update()
+
+
+# ═══════════════════════════════════════════════════════════════
+#  OracleSwitcherCard — oracle model selector popup
+#  Floats above ThinkingBar cell 2 (ORACLE)
+# ═══════════════════════════════════════════════════════════════
+class OracleSwitcherCard(QWidget):
+    """Floating oracle-model selection card that appears above ThinkingBar cell 2."""
+
+    oracle_selected = Signal(str)   # emits Ollama model name string
+    add_model_clicked = Signal()    # opens ModelDownloadCard
+
+    _BG    = QColor("#181818")
+    _BORDER= QColor("#2e2e2e")
+    _TEXT  = QColor("#c8c8c8")
+    _DIM   = QColor("#505050")
+    _TEAL  = QColor("#1a8272")
+    _HOVER = QColor("#222e2c")
+    _WIDTH = 260
+    _ROW_H = 26
+
+    def __init__(self, parent=None):
+        super().__init__(parent, Qt.Tool | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)
+        self.setAttribute(Qt.WA_TranslucentBackground)
+        self.setFont(QFont("Consolas", 9))
+
+        self._models: list = []
+        self._active_model: str = ""
+        self._hover_row: int = -1
+        self._rows: list = []
+
+        QApplication.instance().installEventFilter(self)
+
+    def show_at(self, pos: QPoint, active_model: str):
+        self._active_model = active_model
+        self._models = []
+        self._rebuild()
+        self.move(pos)
+        self.show()
+        self.raise_()
+        self.setFocus()
+        self.activateWindow()
+        self._fetch_thread = OllamaFetchThread()
+        self._fetch_thread.models_ready.connect(self._on_models_ready)
+        self._fetch_thread.start()
+
+    def _on_models_ready(self, names: list):
+        self._models = sorted(names)
+        self._rebuild()
+        self.update()
+
+    def _rebuild(self):
+        trained = _local_trained_models()
+        rows = []
+        rows.append(("header", "ORACLE MODEL", ""))
+
+        if not self._models:
+            rows.append(("loading", "fetching models...", ""))
+        else:
+            groups = {}
+            for n in self._models:
+                base, quant = _parse_quant(n)
+                groups.setdefault(base, []).append((n, quant))
+            for base, variants in groups.items():
+                rows.append(("group", base, ""))
+                for full_name, quant in variants:
+                    badge = "★ local" if full_name in trained else quant
+                    rows.append(("model", full_name, badge))
+
+        rows.append(("sep", "", ""))
+        rows.append(("add", "+ ADD MODEL", ""))
+
+        self._rows = rows
+        h = len(rows) * self._ROW_H + 8
+        self.setFixedSize(self._WIDTH, h)
+
+    def paintEvent(self, _):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        rect = QRectF(0, 0, self.width(), self.height())
+
+        p.setPen(Qt.NoPen)
+        p.setBrush(self._BG)
+        p.drawRoundedRect(rect, 4, 4)
+
+        p.setPen(QPen(self._BORDER, 1))
+        p.setBrush(Qt.NoBrush)
+        p.drawRoundedRect(rect.adjusted(0.5, 0.5, -0.5, -0.5), 4, 4)
+
+        font_bold = QFont("Consolas", 9, QFont.Bold)
+        font_norm = QFont("Consolas", 9)
+        font_dim  = QFont("Consolas", 8)
+
+        y = 4
+        for i, (rtype, label, value) in enumerate(self._rows):
+            ry = y
+            rh = self._ROW_H
+
+            if rtype == "model" and i == self._hover_row:
+                p.setPen(Qt.NoPen)
+                p.setBrush(self._HOVER)
+                p.drawRect(1, ry, self._WIDTH - 2, rh)
+
+            if rtype == "header":
+                p.setFont(font_bold)
+                p.setPen(QPen(self._TEAL))
+                p.drawText(10, ry + 17, label)
+
+            elif rtype == "loading":
+                p.setFont(font_dim)
+                p.setPen(QPen(self._DIM))
+                p.drawText(10, ry + 17, label)
+
+            elif rtype == "group":
+                p.setFont(font_dim)
+                p.setPen(QPen(self._DIM))
+                p.drawText(10, ry + 17, label)
+
+            elif rtype == "model":
+                is_active = label == self._active_model
+                if is_active:
+                    p.setPen(QPen(self._TEAL, 2))
+                    p.drawLine(2, ry + 4, 2, ry + rh - 4)
+                p.setFont(font_norm)
+                p.setPen(QPen(self._TEAL if is_active else self._TEXT))
+                p.drawText(12, ry + 17, label)
+                if value:
+                    p.setFont(font_dim)
+                    p.setPen(QPen(self._DIM))
+                    p.drawText(self._WIDTH - 55, ry + 17, value)
+
+            elif rtype == "add":
+                if i == self._hover_row:
+                    p.setPen(Qt.NoPen)
+                    p.setBrush(self._HOVER)
+                    p.drawRect(1, ry, self._WIDTH - 2, rh)
+                p.setFont(font_bold)
+                p.setPen(QPen(self._TEAL))
+                p.drawText(10, ry + 17, label)
+
+            y += rh
+
+        p.end()
+
+    def mouseMoveEvent(self, e):
+        idx = self._row_at(e.pos().y())
+        if self._hover_row != idx:
+            self._hover_row = idx
+            self.update()
+        super().mouseMoveEvent(e)
+
+    def mousePressEvent(self, e):
+        if e.button() != Qt.LeftButton:
+            return
+        idx = self._row_at(e.pos().y())
+        if idx < 0 or idx >= len(self._rows):
+            return
+        rtype, label, _ = self._rows[idx]
+        if rtype == "model":
+            self.oracle_selected.emit(label)
+            self.hide()
+        elif rtype == "add":
+            self.hide()
+            self.add_model_clicked.emit()
+
+    def _row_at(self, y: int) -> int:
+        row = (y - 4) // self._ROW_H
+        return row if 0 <= row < len(self._rows) else -1
+
+    def keyPressEvent(self, e):
+        if e.key() == Qt.Key_Escape:
+            self.hide()
+
+    def eventFilter(self, obj, event):
+        if self.isVisible() and event.type() == QEvent.MouseButtonPress:
+            try:
+                gpos = event.globalPosition().toPoint()
+            except AttributeError:
+                gpos = event.globalPos()
+            if not self.geometry().contains(gpos):
+                self.hide()
+        return False
+
+    def leaveEvent(self, e):
+        self._hover_row = -1
+        self.update()
+
+
+# ═══════════════════════════════════════════════════════════════
+#  BlackwellConfigCard — Fix B / D / E operator controls popup
+#  Floats above ThinkingBar cell 1 (/BW CONFIG)
+# ═══════════════════════════════════════════════════════════════
+class BlackwellConfigCard(QWidget):
+    """
+    Floating Blackwell config popup — Fix B / D / E controls.
+    Colors match ModelSwitcherCard. Sliders with live value labels.
+    Persists to blackwell/blackwell_config.json on Apply.
+    """
+
+    config_applied = Signal(dict)
+
+    # ── Colors — match ModelSwitcherCard exactly ─────────────────
+    _W      = 380
+    _BG     = "#181818"
+    _BORDER = "#2e2e2e"
+    _TEAL   = "#1a8272"
+    _DIM    = "#505050"
+    _TEXT   = "#c8c8c8"
+
+    DEFAULTS: dict = {
+        "gap_threshold":      0.20,
+        "window_size":        100,
+        "min_samples":        10,
+        "oracle_temperature": 0.80,
+        "judge_temperature":  0.00,
+        "assertion_window":   80,
+        "hedge_window":       60,
+        "enforce_semantic":   True,
+    }
+
+    CONFIG_PATH = os.path.join(
+        os.path.dirname(os.path.abspath(__file__)),
+        "blackwell", "blackwell_config.json",
+    )
+
+    # (key, ftype, hint, sl_min, sl_max, scale)
+    # scale: slider integer = real_value * scale
+    # ftype "float" → display with 2 decimals; "int" → display as int; "bool" → checkbox
+    _FIELDS = [
+        # ── Fix B ────────────────────────────────────────────────
+        ("gap_threshold",      "float", "abort training if oracle/rule gap exceeds this", 5,   50,  100),
+        ("window_size",        "int",   "rolling sample window size",                     10,  500, 1),
+        ("min_samples",        "int",   "samples before drift gate activates",            1,   50,  1),
+        # ── Fix D ────────────────────────────────────────────────
+        ("oracle_temperature", "float", "oracle idea generation creativity",              0,   200, 100),
+        ("judge_temperature",  "float", "evaluator strictness  (0 = fully deterministic)",0,  100, 100),
+        # ── Fix E ────────────────────────────────────────────────
+        ("assertion_window",   "int",   "chars after hedge to find verb/noun",            20,  200, 1),
+        ("hedge_window",       "int",   "chars after hedge to find quantity",             10,  150, 1),
+        ("enforce_semantic",   "bool",  "require real assertion context in calibration",  0,   1,   1),
+    ]
+
+    _GROUPS = [
+        ("DRIFT MONITOR", "Fix B", ["gap_threshold", "window_size", "min_samples"]),
+        ("DECORRELATION",  "Fix D", ["oracle_temperature", "judge_temperature"]),
+        ("ANTI-GAMING",    "Fix E", ["assertion_window", "hedge_window", "enforce_semantic"]),
+    ]
+
+    def __init__(self, parent=None):
+        super().__init__(
+            parent,
+            Qt.Tool | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint,
+        )
+        self.setAttribute(Qt.WA_TranslucentBackground)
+        self.setFixedWidth(self._W)
+        self._config = dict(self.DEFAULTS)
+        self._load_config()
+        # _inputs: key → QSlider or QCheckBox
+        self._inputs:      dict = {}
+        # _val_labels: key → QLabel showing current value
+        self._val_labels:  dict = {}
+        # _field_meta: key → (ftype, scale)
+        self._field_meta:  dict = {f[0]: (f[1], f[5]) for f in self._FIELDS}
+        self._stat_labels: dict = {}
+        self._build_ui()
+        self.adjustSize()
+        QApplication.instance().installEventFilter(self)
+
+    # ── Config I/O ───────────────────────────────────────────────
+
+    def _load_config(self):
+        try:
+            with open(self.CONFIG_PATH, encoding="utf-8") as f:
+                saved = _json.load(f)
+            for k, v in saved.items():
+                if k in self._config:
+                    self._config[k] = v
+        except (FileNotFoundError, _json.JSONDecodeError):
+            pass
+
+    def _save_config(self):
+        try:
+            os.makedirs(os.path.dirname(self.CONFIG_PATH), exist_ok=True)
+            with open(self.CONFIG_PATH, "w", encoding="utf-8") as f:
+                _json.dump(self._config, f, indent=2)
+        except Exception:
+            pass
+
+    def _slider_to_value(self, key: str, sl_int: int):
+        ftype, scale = self._field_meta[key]
+        if ftype == "float":
+            return sl_int / scale
+        return sl_int   # int or bool
+
+    def _value_to_slider(self, key: str, value) -> int:
+        ftype, scale = self._field_meta[key]
+        if ftype == "float":
+            return int(round(float(value) * scale))
+        return int(value)
+
+    def _fmt_value(self, key: str, value) -> str:
+        ftype, _ = self._field_meta[key]
+        if ftype == "float":
+            return f"{float(value):.2f}"
+        return str(int(value))
+
+    def _read_inputs(self) -> dict:
+        out = {}
+        for key, widget in self._inputs.items():
+            if isinstance(widget, QCheckBox):
+                out[key] = widget.isChecked()
+            else:
+                out[key] = self._slider_to_value(key, widget.value())
+        return out
+
+    # ── UI ───────────────────────────────────────────────────────
+
+    def _build_ui(self):
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(1, 1, 1, 1)
+        outer.setSpacing(0)
+
+        inner = QWidget()
+        inner.setObjectName("bwcfg_inner")
+        inner.setStyleSheet(f"""
+            #bwcfg_inner {{
+                background: {self._BG};
+                border: 1px solid {self._BORDER};
+                border-radius: 4px;
+            }}
+            QSlider::groove:horizontal {{
+                height: 3px;
+                background: {self._BORDER};
+                border-radius: 1px;
+            }}
+            QSlider::sub-page:horizontal {{
+                background: {self._TEAL};
+                border-radius: 1px;
+            }}
+            QSlider::handle:horizontal {{
+                width: 11px; height: 11px;
+                margin: -4px 0;
+                background: {self._TEAL};
+                border-radius: 5px;
+            }}
+            QSlider::handle:horizontal:hover {{
+                background: #22a090;
+            }}
+            QCheckBox {{
+                color: {self._TEXT};
+                font-family: Consolas;
+                font-size: 9pt;
+            }}
+            QCheckBox::indicator {{
+                width: 13px; height: 13px;
+                border: 1px solid {self._BORDER};
+                border-radius: 2px;
+                background: #111;
+            }}
+            QCheckBox::indicator:checked {{
+                background: {self._TEAL};
+                border-color: {self._TEAL};
+            }}
+        """)
+
+        vbox = QVBoxLayout(inner)
+        vbox.setContentsMargins(10, 9, 10, 9)
+        vbox.setSpacing(0)
+
+        # ── Header ───────────────────────────────────────────────
+        hdr = QLabel("BLACKWELL CONFIG")
+        hdr.setStyleSheet(
+            f"color:{self._TEAL};font-family:Consolas;font-size:9pt;"
+            "font-weight:bold;letter-spacing:3px;"
+        )
+        vbox.addWidget(hdr)
+        sub = QLabel("Fix B · D · E  —  operator controls")
+        sub.setStyleSheet(f"color:{self._DIM};font-family:Consolas;font-size:8pt;")
+        vbox.addWidget(sub)
+        vbox.addSpacing(7)
+
+        # ── Stat pills ───────────────────────────────────────────
+        _stat_defs = [
+            ("GAP",        "gap_threshold",      lambda c: f"{c['gap_threshold']:.2f}"),
+            ("ORC TEMP",   "oracle_temperature",  lambda c: f"{c['oracle_temperature']:.2f}"),
+            ("JUDGE TEMP", "judge_temperature",   lambda c: f"{c['judge_temperature']:.2f}"),
+            ("GATE",       "window_size",         lambda c: f"{c['min_samples']}/{c['window_size']}"),
+        ]
+        pills_row = QHBoxLayout()
+        pills_row.setSpacing(4)
+        for pill_name, stat_key, fmt_fn in _stat_defs:
+            pill = QFrame()
+            pill.setStyleSheet(
+                f"background:#1f1f1f;border:1px solid {self._BORDER};border-radius:3px;"
+            )
+            pv = QVBoxLayout(pill)
+            pv.setContentsMargins(6, 3, 6, 3)
+            pv.setSpacing(1)
+            ln = QLabel(pill_name)
+            ln.setStyleSheet(
+                f"color:{self._DIM};font-family:Consolas;font-size:7pt;letter-spacing:1px;"
+            )
+            lv = QLabel(fmt_fn(self._config))
+            lv.setStyleSheet(
+                f"color:{self._TEAL};font-family:Consolas;font-size:10pt;font-weight:bold;"
+            )
+            pv.addWidget(ln)
+            pv.addWidget(lv)
+            pills_row.addWidget(pill)
+            self._stat_labels[stat_key] = (lv, fmt_fn)
+
+        pills_wrap = QWidget()
+        pills_wrap.setLayout(pills_row)
+        vbox.addWidget(pills_wrap)
+        vbox.addSpacing(8)
+
+        # ── Build field lookup ────────────────────────────────────
+        field_lookup = {f[0]: f for f in self._FIELDS}
+
+        # ── Groups ───────────────────────────────────────────────
+        for grp_name, fix_lbl, keys in self._GROUPS:
+            # Section header row
+            sec = QWidget()
+            sec.setStyleSheet(f"background:#1f1f1f;border-radius:2px;")
+            sh = QHBoxLayout(sec)
+            sh.setContentsMargins(6, 2, 6, 2)
+            g_t = QLabel(grp_name)
+            g_t.setStyleSheet(
+                f"color:{self._TEAL};font-family:Consolas;"
+                "font-size:8pt;font-weight:bold;letter-spacing:2px;"
+            )
+            g_f = QLabel(fix_lbl)
+            g_f.setStyleSheet(
+                f"color:{self._DIM};font-family:Consolas;font-size:8pt;"
+            )
+            sh.addWidget(g_t)
+            sh.addStretch()
+            sh.addWidget(g_f)
+            vbox.addWidget(sec)
+            vbox.addSpacing(3)
+
+            for key in keys:
+                _, ftype, hint, sl_min, sl_max, scale = field_lookup[key]
+                cur_val = self._config.get(key, self.DEFAULTS[key])
+
+                # ── Key name + value label row ────────────────────
+                top_row = QWidget()
+                top_h = QHBoxLayout(top_row)
+                top_h.setContentsMargins(2, 0, 2, 0)
+                top_h.setSpacing(4)
+
+                lbl_key = QLabel(key)
+                lbl_key.setStyleSheet(
+                    f"color:{self._TEXT};font-family:Consolas;font-size:8pt;"
+                )
+                lbl_key.setToolTip(hint)
+                top_h.addWidget(lbl_key, 1)
+
+                if ftype == "bool":
+                    # Boolean: checkbox on right side of key row, no slider row
+                    cb = QCheckBox()
+                    cb.setChecked(bool(cur_val))
+                    cb.stateChanged.connect(self._update_stats)
+                    top_h.addWidget(cb)
+                    self._inputs[key] = cb
+                    vbox.addWidget(top_row)
+                else:
+                    # Numeric: show formatted value on right
+                    lbl_val = QLabel(self._fmt_value(key, cur_val))
+                    lbl_val.setFixedWidth(34)
+                    lbl_val.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+                    lbl_val.setStyleSheet(
+                        f"color:{self._TEAL};font-family:Consolas;"
+                        "font-size:8pt;font-weight:bold;"
+                    )
+                    top_h.addWidget(lbl_val)
+                    self._val_labels[key] = lbl_val
+                    vbox.addWidget(top_row)
+
+                    # Slider row
+                    sl_row = QWidget()
+                    sl_h = QHBoxLayout(sl_row)
+                    sl_h.setContentsMargins(2, 0, 2, 4)
+                    sl_h.setSpacing(0)
+
+                    slider = QSlider(Qt.Horizontal)
+                    slider.setMinimum(sl_min)
+                    slider.setMaximum(sl_max)
+                    slider.setValue(self._value_to_slider(key, cur_val))
+                    slider.setFixedHeight(18)
+
+                    def _make_cb(k, lv):
+                        def on_change(v):
+                            real = self._slider_to_value(k, v)
+                            lv.setText(self._fmt_value(k, real))
+                            self._update_stats()
+                        return on_change
+
+                    slider.valueChanged.connect(_make_cb(key, lbl_val))
+                    sl_h.addWidget(slider)
+                    self._inputs[key] = slider
+                    vbox.addWidget(sl_row)
+
+                # Hint label (dim, small)
+                hint_lbl = QLabel(hint)
+                hint_lbl.setStyleSheet(
+                    f"color:{self._DIM};font-family:Consolas;font-size:7pt;"
+                )
+                hint_lbl.setContentsMargins(2, 0, 2, 3)
+                vbox.addWidget(hint_lbl)
+
+            vbox.addSpacing(5)
+
+        # ── Separator ────────────────────────────────────────────
+        sep = QFrame()
+        sep.setFrameShape(QFrame.HLine)
+        sep.setStyleSheet(f"border-top:1px solid {self._BORDER};")
+        sep.setFixedHeight(1)
+        vbox.addWidget(sep)
+        vbox.addSpacing(6)
+
+        # ── Buttons ──────────────────────────────────────────────
+        btn_row = QHBoxLayout()
+        btn_row.setSpacing(6)
+
+        apply_btn = QPushButton("APPLY")
+        apply_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: {self._TEAL};
+                color: {self._TEXT};
+                border: none;
+                border-radius: 3px;
+                font-family: Consolas; font-size: 8pt;
+                letter-spacing: 2px; padding: 4px 14px;
+            }}
+            QPushButton:hover {{ background: #22a090; }}
+            QPushButton:pressed {{ background: #155f56; }}
+        """)
+        apply_btn.setCursor(Qt.PointingHandCursor)
+        apply_btn.clicked.connect(self._apply)
+
+        reset_btn = QPushButton("RESET")
+        reset_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: transparent;
+                color: {self._DIM};
+                border: 1px solid {self._BORDER};
+                border-radius: 3px;
+                font-family: Consolas; font-size: 8pt;
+                letter-spacing: 2px; padding: 4px 14px;
+            }}
+            QPushButton:hover {{
+                color: {self._TEXT};
+                border-color: #505050;
+            }}
+        """)
+        reset_btn.setCursor(Qt.PointingHandCursor)
+        reset_btn.clicked.connect(self._reset)
+
+        btn_row.addStretch()
+        btn_row.addWidget(reset_btn)
+        btn_row.addWidget(apply_btn)
+        vbox.addLayout(btn_row)
+
+        outer.addWidget(inner)
+
+    # ── Slots ────────────────────────────────────────────────────
+
+    def _update_stats(self, *_):
+        current = self._read_inputs()
+        for key, (lbl, fmt_fn) in self._stat_labels.items():
+            try:
+                lbl.setText(fmt_fn(current))
+            except Exception:
+                pass
+
+    def _apply(self):
+        self._config = self._read_inputs()
+        self._save_config()
+        self.config_applied.emit(dict(self._config))
+        self.hide()
+
+    def _reset(self):
+        self._config = dict(self.DEFAULTS)
+        for key, widget in self._inputs.items():
+            val = self.DEFAULTS[key]
+            if isinstance(widget, QCheckBox):
+                widget.setChecked(bool(val))
+            else:
+                widget.setValue(self._value_to_slider(key, val))
+        self._update_stats()
+
+    def show_at(self, pos: QPoint):
+        self._load_config()
+        for key, widget in self._inputs.items():
+            val = self._config.get(key, self.DEFAULTS[key])
+            if isinstance(widget, QCheckBox):
+                widget.setChecked(bool(val))
+            else:
+                widget.setValue(self._value_to_slider(key, val))
+                if key in self._val_labels:
+                    self._val_labels[key].setText(self._fmt_value(key, val))
+        self._update_stats()
+        self.adjustSize()
+        self.move(pos)
+        self.show()
+        self.raise_()
+        self.activateWindow()
+
+    def keyPressEvent(self, e):
+        if e.key() == Qt.Key_Escape:
+            self.hide()
+
+    def eventFilter(self, obj, event):
+        if self.isVisible() and event.type() == QEvent.MouseButtonPress:
+            try:
+                gpos = event.globalPosition().toPoint()
+            except AttributeError:
+                gpos = event.globalPos()
+            if not self.geometry().contains(gpos):
+                self.hide()
+        return False
 
 
 AGENT_PATH = r"C:\Users\gamer23\Desktop\hermes-agent\agent.py"
@@ -424,13 +1296,14 @@ def _dragon_splash_into_console(console_widget):
     for raw in _DRAGON_ART:
         console_widget.appendHtml(_dragon_render_line(raw))
     console_widget.appendHtml(
-        '<span style="white-space:pre;font-family:Consolas,monospace;font-size:13pt;'
-        'color:#4dcdb4;font-weight:bold;letter-spacing:8px;">'
-        '          Z  E  P  H  Y  R</span>'
+        '<p style="font-family:Consolas,monospace;font-size:13pt;'
+        'color:#4dcdb4;font-weight:bold;letter-spacing:8px;'
+        'text-align:center;margin:0;">Z  E  P  H  Y  R</p>'
     )
     console_widget.appendHtml(
-        '<span style="white-space:pre;font-family:Consolas,monospace;font-size:8.5pt;'
-        'color:#2a7a5a;">    Prycat Research  \xb7  local intelligence  \xb7  BlackLoRA-N core</span>'
+        '<p style="font-family:Consolas,monospace;font-size:8.5pt;'
+        'color:#2a7a5a;text-align:center;margin:0;">'
+        'Prycat Research  \xb7  local intelligence  \xb7  BlackLoRA-N core</p>'
     )
     _QApp.processEvents()
 
@@ -777,8 +1650,8 @@ class ConsoleWidget(QPlainTextEdit):
         font = QFont("Consolas", 10)
         self.setFont(font)
 
-        # Left/right breathing room so text doesn't hug the edges
-        self.setViewportMargins(32, 8, 32, 8)
+        # Small inner breathing room — outer centering is handled by the layout
+        self.setViewportMargins(16, 8, 16, 8)
 
         palette = self.palette()
         palette.setColor(QPalette.ColorRole.Base, C_BG)
@@ -1012,10 +1885,12 @@ def _iso_proj(wx, wy, wz, pcx, pcy, cosY, sinY, cosP, sinP, cam, bias):
 # ═══════════════════════════════════════════════════════════════
 class ThinkingBar(QWidget):
     HEIGHT = 80
-    _CELL_LABELS = ["MODEL",   "/BLACKWELL",  "COMMIT",   "LOAD"]
+    _CELL_LABELS = ["MODEL",   "/BW CONFIG",  "ORACLE",   "LOAD"]
     _CELL_VALUES = ["hermes3:8b", "vector accrual", "branch sel.", "inertia cls-v"]
 
-    model_cell_clicked = Signal()
+    model_cell_clicked      = Signal()
+    blackwell_cell_clicked  = Signal()
+    oracle_cell_clicked     = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -1023,7 +1898,9 @@ class ThinkingBar(QWidget):
         self.setSizePolicy(QSizePolicy.Policy.Expanding,
                            QSizePolicy.Policy.Fixed)
         self.setMouseTracking(True)
-        self._model_cell_hovered = False
+        self._model_cell_hovered     = False
+        self._blackwell_cell_hovered = False
+        self._oracle_cell_hovered    = False
         self._tq_enabled = False
         self._active_model_full = "hermes3:8b"
         self._CELL_VALUES = list(self._CELL_VALUES)  # make instance-level mutable copy
@@ -1137,6 +2014,32 @@ class ThinkingBar(QWidget):
         cell_h   = H - PAD * 2
         return QRect(int(mid_x), PAD, int(cell_w), int(cell_h))
 
+    def _cell1_rect(self) -> QRect:
+        """Bounding rect of cell 1 (/BW CONFIG) in local widget coordinates."""
+        W, H = self.width(), self.height()
+        PAD     = 12
+        LEFT_W  = 196
+        RIGHT_W = 200
+        mid_x   = PAD + LEFT_W + 10
+        mid_w   = W - PAD - LEFT_W - 10 - RIGHT_W - 10 - PAD
+        cell_gap = 6
+        cell_w   = max(1, (mid_w - cell_gap * 3) // 4)
+        cell_h   = H - PAD * 2
+        return QRect(int(mid_x + cell_w + cell_gap), PAD, int(cell_w), int(cell_h))
+
+    def _cell2_rect(self) -> QRect:
+        """Bounding rect of cell 2 (ORACLE) in local widget coordinates."""
+        W, H = self.width(), self.height()
+        PAD     = 12
+        LEFT_W  = 196
+        RIGHT_W = 200
+        mid_x   = PAD + LEFT_W + 10
+        mid_w   = W - PAD - LEFT_W - 10 - RIGHT_W - 10 - PAD
+        cell_gap = 6
+        cell_w   = max(1, (mid_w - cell_gap * 3) // 4)
+        cell_h   = H - PAD * 2
+        return QRect(int(mid_x + (cell_w + cell_gap) * 2), PAD, int(cell_w), int(cell_h))
+
     # ── Animation ─────────────────────────────────────────────
     @staticmethod
     def _lerp(a, b, t):
@@ -1189,24 +2092,41 @@ class ThinkingBar(QWidget):
         self._tq_enabled = enabled
         self.set_active_model(self._active_model_full)
 
-    # ── Mouse interaction (cell 0) ────────────────────────────
+    # ── Mouse interaction (cells 0, 1, 2) ────────────────────
     def mouseMoveEvent(self, e):
-        hovered = self._cell0_rect().contains(e.pos())
-        if hovered != self._model_cell_hovered:
-            self._model_cell_hovered = hovered
-            self.setCursor(Qt.PointingHandCursor if hovered else Qt.ArrowCursor)
+        pos = e.pos()
+        h0 = self._cell0_rect().contains(pos)
+        h1 = self._cell1_rect().contains(pos)
+        h2 = self._cell2_rect().contains(pos)
+        changed = (h0 != self._model_cell_hovered or
+                   h1 != self._blackwell_cell_hovered or
+                   h2 != self._oracle_cell_hovered)
+        self._model_cell_hovered     = h0
+        self._blackwell_cell_hovered = h1
+        self._oracle_cell_hovered    = h2
+        if changed:
+            self.setCursor(
+                Qt.PointingHandCursor if (h0 or h1 or h2) else Qt.ArrowCursor
+            )
             self.update()
         super().mouseMoveEvent(e)
 
     def leaveEvent(self, e):
-        if self._model_cell_hovered:
-            self._model_cell_hovered = False
+        if self._model_cell_hovered or self._blackwell_cell_hovered or self._oracle_cell_hovered:
+            self._model_cell_hovered     = False
+            self._blackwell_cell_hovered = False
+            self._oracle_cell_hovered    = False
             self.setCursor(Qt.ArrowCursor)
             self.update()
 
     def mousePressEvent(self, e):
-        if e.button() == Qt.LeftButton and self._cell0_rect().contains(e.pos()):
-            self.model_cell_clicked.emit()
+        if e.button() == Qt.LeftButton:
+            if self._cell0_rect().contains(e.pos()):
+                self.model_cell_clicked.emit()
+            elif self._cell1_rect().contains(e.pos()):
+                self.blackwell_cell_clicked.emit()
+            elif self._cell2_rect().contains(e.pos()):
+                self.oracle_cell_clicked.emit()
         super().mousePressEvent(e)
 
     # ── Signal colour ─────────────────────────────────────────
@@ -1328,6 +2248,10 @@ class ThinkingBar(QWidget):
 
                 if i == 0 and self._model_cell_hovered:
                     p.setPen(QPen(QColor("#2a6258"), 1))
+                    p.drawRect(QRectF(cx, cy, cell_w, cell_h))
+
+                if i == 1 and self._blackwell_cell_hovered:
+                    p.setPen(QPen(QColor("#2a3d62"), 1))
                     p.drawRect(QRectF(cx, cy, cell_w, cell_h))
 
                 p.setFont(QFont("Consolas", 7))
@@ -1879,6 +2803,14 @@ class PaletteWidget(QWidget):
             True,
         ),
         (
+            "/axioms",
+            "/blackwell axioms",
+            "20-question interview: logic, tone, and antinomy probes.\n"
+            "You set the ground truth — your answers become the immutable\n"
+            "training anchors Zephyr cannot drift away from.",
+            True,
+        ),
+        (
             "/coding-blackwell",
             "/coding-blackwell",
             "CS-focused planning session — Zephyr interviews you on coding habits,\n"
@@ -2139,6 +3071,7 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("Zephyr — Prycat Research")
         self.resize(1100, 700)
         self.setMinimumSize(800, 500)
+        self.setMouseTracking(True)
 
         # Remove OS chrome — our ZephyrTitleBar takes over
         self.setWindowFlags(
@@ -2191,6 +3124,22 @@ class MainWindow(QMainWindow):
         self._model_card.model_selected.connect(self._on_model_selected)
         self._model_card.turboquant_toggled.connect(self._on_turboquant_toggled)
         self._thinking_bar.model_cell_clicked.connect(self._show_model_card)
+
+        # Blackwell config card — Fix B / D / E operator controls
+        self._blackwell_card = BlackwellConfigCard()
+        self._thinking_bar.blackwell_cell_clicked.connect(self._show_blackwell_card)
+
+        # Oracle model switcher card — cell 2
+        self._oracle_model = _cfg.get("oracle_model", "hermes3:8b")
+        self._oracle_card = OracleSwitcherCard()
+        self._oracle_card.oracle_selected.connect(self._on_oracle_selected)
+        self._thinking_bar.oracle_cell_clicked.connect(self._show_oracle_card)
+
+        # Model download card — shared by both model pickers
+        self._download_card = ModelDownloadCard()
+        self._download_card.download_complete.connect(self._on_download_complete)
+        self._model_card.add_model_clicked.connect(self._show_download_card)
+        self._oracle_card.add_model_clicked.connect(self._show_download_card)
 
         # Input row
         input_row = QWidget()
@@ -2336,6 +3285,66 @@ class MainWindow(QMainWindow):
         card_pos.setY(max(screen.top(), card_pos.y()))
         self._model_card.show_at(card_pos, self._active_model, self._tq_enabled)
 
+    def _show_blackwell_card(self):
+        """Position and show BlackwellConfigCard above ThinkingBar cell 1."""
+        cell_rect  = self._thinking_bar._cell1_rect()
+        global_pos = self._thinking_bar.mapToGlobal(cell_rect.topLeft())
+        self._blackwell_card.adjustSize()
+        card_h = self._blackwell_card.height() or 480
+        card_w = self._blackwell_card.width()
+        card_pos = QPoint(global_pos.x(), global_pos.y() - card_h - 4)
+        # Clamp horizontally so it doesn't run off the right edge
+        screen = QApplication.primaryScreen().availableGeometry()
+        card_pos.setY(max(screen.top(), card_pos.y()))
+        card_pos.setX(min(card_pos.x(), screen.right() - card_w - 4))
+        self._blackwell_card.show_at(card_pos)
+
+    def _show_download_card(self):
+        """Show ModelDownloadCard centred above the ThinkingBar."""
+        bar_rect   = self._thinking_bar.geometry()
+        global_top = self._thinking_bar.mapToGlobal(QPoint(0, 0)).y()
+        card_w     = ModelDownloadCard._WIDTH
+        card_h     = self._download_card.sizeHint().height() or 240
+        cx         = self._thinking_bar.mapToGlobal(QPoint(bar_rect.width() // 2, 0)).x()
+        pos        = QPoint(cx - card_w // 2, global_top - card_h - 4)
+        screen     = QApplication.primaryScreen().availableGeometry()
+        pos.setY(max(screen.top(), pos.y()))
+        pos.setX(max(screen.left() + 4, min(pos.x(), screen.right() - card_w - 4)))
+        self._download_card.show_at(pos)
+
+    def _on_download_complete(self):
+        """Refresh both open pickers after a successful pull."""
+        # Re-fetch model lists so new model appears immediately
+        if self._model_card.isVisible():
+            self._model_card.show_at(
+                self._model_card.pos(),
+                self._active_model,
+                self._tq_enabled,
+            )
+        if self._oracle_card.isVisible():
+            self._oracle_card.show_at(
+                self._oracle_card.pos(),
+                self._oracle_model,
+            )
+
+    def _show_oracle_card(self):
+        """Position and show OracleSwitcherCard above ThinkingBar cell 2."""
+        cell_rect  = self._thinking_bar._cell2_rect()
+        global_pos = self._thinking_bar.mapToGlobal(cell_rect.topLeft())
+        card_h = self._oracle_card.height() if self._oracle_card.height() > 0 else 200
+        card_pos = QPoint(global_pos.x(), global_pos.y() - card_h - 4)
+        screen = QApplication.primaryScreen().availableGeometry()
+        card_pos.setY(max(screen.top(), card_pos.y()))
+        card_pos.setX(min(card_pos.x(), screen.right() - OracleSwitcherCard._WIDTH - 4))
+        self._oracle_card.show_at(card_pos, self._oracle_model)
+
+    def _on_oracle_selected(self, model_name: str):
+        """Persist the chosen oracle model to config."""
+        self._oracle_model = model_name
+        cfg = load_zephyr_config()
+        cfg["oracle_model"] = model_name
+        save_zephyr_config(cfg)
+
     def _on_model_selected(self, model_name: str):
         """Switch active model in agent and persist."""
         self._active_model = model_name
@@ -2351,6 +3360,114 @@ class MainWindow(QMainWindow):
         cfg = load_zephyr_config()
         cfg["turboquant_enabled"] = enabled
         save_zephyr_config(cfg)
+
+    _RESIZE_MARGIN = 8
+
+    def _enable_native_resize(self):
+        """Add WS_THICKFRAME to the HWND so Windows handles edge-resize natively.
+
+        FramelessWindowHint removes the OS chrome but also strips WS_THICKFRAME,
+        which is what gives a window its resizable border.  Re-adding it via the
+        Windows API restores resize cursors and drag-resize.
+
+        WS_THICKFRAME also creates an invisible non-client border that would eat
+        scroll events — nativeEvent handles WM_NCCALCSIZE to collapse that border
+        back to zero while keeping the thick-frame resize hit-testing.
+        """
+        import ctypes
+        GWL_STYLE     = -16
+        WS_THICKFRAME = 0x00040000
+        SWP_FLAGS     = 0x0001 | 0x0002 | 0x0004 | 0x0010 | 0x0020
+
+        hwnd   = int(self.winId())
+        user32 = ctypes.windll.user32
+        style  = user32.GetWindowLongW(hwnd, GWL_STYLE)
+        user32.SetWindowLongW(hwnd, GWL_STYLE, style | WS_THICKFRAME)
+        user32.SetWindowPos(hwnd, 0, 0, 0, 0, 0, SWP_FLAGS)
+
+    def nativeEvent(self, event_type, message):
+        """Handle WM_NCCALCSIZE and WM_NCHITTEST for frameless resize.
+
+        WS_THICKFRAME gives Windows resize hit-testing but also creates an
+        invisible non-client border that steals scroll/click events.
+        WM_NCCALCSIZE → 0  collapses that border so the entire rect is client
+        area (scroll works everywhere).
+        WM_NCHITTEST returns the correct HTXXX zone so Windows shows the right
+        resize cursor and handles the actual drag.
+
+        Fields are read at exact byte offsets rather than via a ctypes struct
+        so there is no struct-alignment crash risk.
+        Offsets on 64-bit Windows MSG:
+          +0  hwnd    (8 bytes)
+          +8  message (4 bytes)
+          +12 pad     (4 bytes implicit)
+          +16 wParam  (8 bytes)
+          +24 lParam  (8 bytes)
+        Offsets on 32-bit:
+          +0  hwnd    (4 bytes)
+          +4  message (4 bytes)
+          +8  wParam  (4 bytes)
+          +12 lParam  (4 bytes)
+        """
+        if bytes(event_type) == b"windows_generic_MSG":
+            import ctypes, sys
+            from PySide6.QtCore import QPoint
+
+            WM_NCCALCSIZE = 0x0083
+            WM_NCHITTEST  = 0x0084
+            HTTOP         = 12
+            HTTOPLEFT     = 13
+            HTTOPRIGHT    = 14
+            HTBOTTOM      = 15
+            HTBOTTOMLEFT  = 16
+            HTBOTTOMRIGHT = 17
+            HTLEFT        = 10
+            HTRIGHT       = 11
+
+            addr = int(message)
+            is64 = sys.maxsize > 2**32
+
+            # Read message field at known offset (no struct needed)
+            msg_offset  = 8 if is64 else 4
+            lp_offset   = 24 if is64 else 12
+            lp_type     = ctypes.c_int64 if is64 else ctypes.c_int32
+
+            try:
+                msg_id = ctypes.c_uint32.from_address(addr + msg_offset).value
+            except Exception:
+                return super().nativeEvent(event_type, message)
+
+            if msg_id == WM_NCCALCSIZE:
+                # Zero non-client area — entire window rect becomes client area
+                return True, 0
+
+            if msg_id == WM_NCHITTEST:
+                try:
+                    lp = lp_type.from_address(addr + lp_offset).value
+                except Exception:
+                    return super().nativeEvent(event_type, message)
+
+                # Signed 16-bit screen coords packed into lParam
+                sx = ctypes.c_int16(lp & 0xFFFF).value
+                sy = ctypes.c_int16((lp >> 16) & 0xFFFF).value
+                local  = self.mapFromGlobal(QPoint(sx, sy))
+                x, y   = local.x(), local.y()
+                w, h   = self.width(), self.height()
+                m      = self._RESIZE_MARGIN
+                left   = x <= m
+                right  = x >= w - m
+                top    = y <= m
+                bottom = y >= h - m
+                if top    and left:  return True, HTTOPLEFT
+                if top    and right: return True, HTTOPRIGHT
+                if bottom and left:  return True, HTBOTTOMLEFT
+                if bottom and right: return True, HTBOTTOMRIGHT
+                if top:              return True, HTTOP
+                if bottom:           return True, HTBOTTOM
+                if left:             return True, HTLEFT
+                if right:            return True, HTRIGHT
+
+        return super().nativeEvent(event_type, message)
 
     def closeEvent(self, event):
         self._process.stop()
@@ -2405,4 +3522,5 @@ if __name__ == "__main__":
 
     window = MainWindow()
     window.show()
+    window._enable_native_resize()   # must be after show() so winId() is valid
     sys.exit(app.exec())

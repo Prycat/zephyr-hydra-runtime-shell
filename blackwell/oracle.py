@@ -9,22 +9,58 @@ Key difference from naive fine-tuning:
   - Data is corrective: generated specifically along the steering vector
   - Allocation per dimension is proportional to steering magnitude
   - This implements Blackwell's regret-matching selection criterion
+
+Fix D (Oracle-Evaluator Decorrelation):
+  The Oracle uses temperature=0.80 and a "Creative/Exploratory" system prompt,
+  deliberately contrasted with the Evaluator's temperature=0.0 "Strict Logician"
+  persona (see evaluator.py).
+
+  Both use hermes3:8b as the base model.  By biasing toward opposite ends of
+  the creativity/determinism spectrum, their error modes are decorrelated:
+    - Evaluator bias: correctness, conservative, penalises ambiguity
+    - Oracle bias:    novelty, frontier, explores the edge of the prompt space
+
+  This means a systematic blind spot in one is unlikely to be a blind spot
+  in the other — preventing the "polite hallucination" co-evolution failure.
 """
 
 import json
 import os
 import httpx
 
-OLLAMA_URL = "http://localhost:11434/v1/chat/completions"
-MODEL      = "hermes3:8b"
+# ── Structural mandatory filter ───────────────────────────────────────────────
+from blackwell.csam_guard import verify_integrity as _csam_verify, check as _csam_check
+_csam_verify()
+# ─────────────────────────────────────────────────────────────────────────────
+
+from config import OLLAMA_CHAT_URL as OLLAMA_URL
+
+def _get_oracle_model() -> str:
+    """Read oracle model from ~/.zephyr/config.json, falling back to hermes3:8b."""
+    try:
+        import json as _j
+        cfg_path = os.path.join(os.path.expanduser("~/.zephyr"), "config.json")
+        with open(cfg_path, "r", encoding="utf-8") as f:
+            return _j.load(f).get("oracle_model", "hermes3:8b")
+    except Exception:
+        return "hermes3:8b"
+
+MODEL = _get_oracle_model()
 TRAINING_PATH = os.path.join(os.path.dirname(__file__), "training_pairs.jsonl")
 
 DIMS = ["accuracy", "logic", "tone", "curiosity", "safety"]
 
-ORACLE_SYSTEM = """You are the Oracle for the Prycat Research Team's Blackwell Self-Modification System.
-You generate synthetic training dialogues for an AI called Zephyr.
-Zephyr is a research assistant. Bold. Direct. Curious. Never pads.
-Prycat's mission: push the boundary of what local AI can do."""
+# Fix D — Creative/Exploratory Oracle persona.
+# High temperature (0.80) + frontier-seeking prompt = maximally decorrelated
+# from the Strict Logician judge.  The Oracle must push into edge cases,
+# unusual framings, and non-obvious prompts.  This is intentional:
+# we want the training data frontier to be HARDER than the eval frontier.
+ORACLE_SYSTEM = """You are the Creative Oracle for the Prycat Research Team's Blackwell Self-Modification System.
+Your role is to synthesise training dialogues that push Zephyr into edge cases and frontier territory.
+You generate prompts that are unusual, challenging, and non-obvious — not safe, predictable questions.
+Zephyr is a research assistant: bold, direct, curious, zero padding.
+Push the boundary. Generate dialogues that a deterministic evaluator would rate as difficult but correct.
+Prycat's mission: find the edge of what local AI can do, then train past it."""
 
 DIM_GUIDANCE = {
     "accuracy": {
@@ -140,7 +176,10 @@ def synthesise(
                     {"role": "system", "content": ORACLE_SYSTEM},
                     {"role": "user",   "content": prompt},
                 ],
-                "temperature": 0.85,
+                # Fix D: 0.80 → Creative/Exploratory mode.
+                # Deliberately higher than the Evaluator's 0.0 to decorrelate
+                # error modes.  Do not lower this — it defeats Fix D.
+                "temperature": 0.80,
                 "max_tokens":  2500,
             },
             timeout=120,
@@ -178,9 +217,14 @@ def _parse_pairs(raw: str) -> list[dict]:
                 zephyr_lines.append(ls)
 
         if human_lines and zephyr_lines:
+            zephyr_text = " ".join(zephyr_lines).strip()
+            # Screen the Oracle's output before it becomes training data.
+            # CSAMViolationError is allowed to propagate — a violation here
+            # means the Oracle itself generated CSAM, which is a hard abort.
+            _csam_check(zephyr_text, context="oracle synthesis")
             pairs.append({
                 "human":      " ".join(human_lines).strip(),
-                "zephyr":     " ".join(zephyr_lines).strip(),
+                "zephyr":     zephyr_text,
                 "target_dim": target_dim or "unknown",
             })
     return pairs

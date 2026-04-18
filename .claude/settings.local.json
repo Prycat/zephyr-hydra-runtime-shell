@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(py -3.11 -c \"import torch; print\\('torch:', torch.__version__\\); print\\('CUDA available:', torch.cuda.is_available\\(\\)\\); print\\('CUDA version:', torch.version.cuda\\)\")",
+      "Bash(py -3.11 -m pytest tests/test_blackwell_fixes.py -v --tb=short)",
+      "Bash(py -3.11 -m pytest tests/test_probe_runner.py tests/test_blackwell_fixes.py -v --tb=short)",
+      "Bash(py -3.11 -c ':*)",
+      "Bash(python -c ':*)",
+      "Bash(dir \"C:\\\\Users\\\\gamer23\\\\Desktop\\\\hermes-agent\\\\blackwell\\\\adapters\" /s /b)",
+      "Bash(python -c ' *)",
+      "Bash(dir \"C:\\\\Users\\\\gamer23\\\\AppData\\\\Local\\\\Programs\\\\Python\\\\Python311\\\\Scripts\")",
+      "Bash(find /c/Users/gamer23/Desktop/hermes-agent -maxdepth 1 -type f -name \"*.py\" -exec ls -lh {} \\\\;)"
+    ]
+  }
+}

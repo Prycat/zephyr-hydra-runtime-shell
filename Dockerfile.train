@@ -1,0 +1,35 @@
+# Prycat — LoRA training container (requires NVIDIA GPU)
+# Usage: docker compose --profile train up
+# Requires: NVIDIA Container Toolkit installed on host
+#           https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html
+FROM nvidia/cuda:12.4.1-devel-ubuntu22.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update && apt-get install -y \
+    python3.11 \
+    python3-pip \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN ln -sf /usr/bin/python3.11 /usr/bin/python && \
+    ln -sf /usr/bin/pip3 /usr/bin/pip
+
+WORKDIR /app
+
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# PyTorch with CUDA 12.4 must come before unsloth
+RUN pip install --no-cache-dir \
+    torch==2.6.0 torchvision torchaudio \
+    --index-url https://download.pytorch.org/whl/cu124
+
+COPY requirements-train.txt .
+RUN pip install --no-cache-dir -r requirements-train.txt
+
+COPY . .
+
+ENV OLLAMA_HOST=http://ollama:11434
+
+CMD ["python", "-c", "from blackwell.lora_steer import main; main()"]

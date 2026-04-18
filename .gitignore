@@ -1,0 +1,33 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+*.egg-info/
+dist/
+build/
+
+# Large model weights — upload to HuggingFace separately
+blackwell/adapters/merged/
+blackwell/adapters/gguf/
+blackwell/adapters/latest/adapter_model.safetensors
+unsloth_compiled_cache/
+
+# Runtime data — machine-specific
+blackwell.db
+blackwell/training_pairs.jsonl
+blackwell/probe_report.json
+trajectory_samples.jsonl
+mempalace_db/
+
+# Config — contains API keys / tokens
+.zephyr/
+blackwell/human_axioms.jsonl
+
+# Ollama Modelfile — generated at export time
+blackwell/Modelfile
+
+# OS
+.DS_Store
+Thumbs.db

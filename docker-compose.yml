@@ -1,0 +1,73 @@
+services:
+
+  # Ollama — local LLM inference server
+  ollama:
+    image: ollama/ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_models:/root/.ollama
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:11434/api/tags"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
+  # Pull the base model on first run
+  ollama-init:
+    image: ollama/ollama
+    depends_on:
+      ollama:
+        condition: service_healthy
+    volumes:
+      - ollama_models:/root/.ollama
+    entrypoint: ["ollama", "pull", "hermes3:8b"]
+    environment:
+      - OLLAMA_HOST=http://ollama:11434
+
+  # Prycat CLI agent
+  prycat:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    depends_on:
+      ollama:
+        condition: service_healthy
+    environment:
+      - OLLAMA_HOST=http://ollama:11434
+    volumes:
+      - ./blackwell.db:/app/blackwell.db
+      - ./blackwell/adapters:/app/blackwell/adapters
+      - prycat_config:/root/.zephyr
+    stdin_open: true
+    tty: true
+
+  # LoRA training — only runs when explicitly called
+  # Usage: docker compose --profile train run prycat-train
+  prycat-train:
+    build:
+      context: .
+      dockerfile: Dockerfile.train
+    profiles: ["train"]
+    depends_on:
+      ollama:
+        condition: service_healthy
+    environment:
+      - OLLAMA_HOST=http://ollama:11434
+    volumes:
+      - ./blackwell:/app/blackwell
+      - ./blackwell.db:/app/blackwell.db
+      - prycat_config:/root/.zephyr
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+volumes:
+  ollama_models:
+  prycat_config:

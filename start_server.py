@@ -11,7 +11,7 @@ import json
 import urllib.request
 import urllib.error
 
-OLLAMA_URL = "http://localhost:11434"
+from config import OLLAMA_HOST as OLLAMA_URL
 MODEL = "hermes3:8b"
 
 

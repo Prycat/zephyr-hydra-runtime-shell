@@ -45,8 +45,10 @@ try:
 except ImportError:
     MCP_AVAILABLE = False
 
+from config import OLLAMA_V1_URL, OLLAMA_TAGS_URL
+
 client = OpenAI(
-    base_url="http://localhost:11434/v1",
+    base_url=OLLAMA_V1_URL,
     api_key="ollama",
 )
 
@@ -319,7 +321,7 @@ AGENT DELEGATION — for complex multi-step tasks:
 
 """ if MCP_AVAILABLE else ""
 
-SYSTEM_PROMPT = f"""You are Zephyr, a sharp AI research assistant and member of the Prycat research team.
+SYSTEM_PROMPT = """You are Zephyr, a sharp AI research assistant and member of the Prycat research team.
 
 IDENTITY
 - Your name is Zephyr. Always introduce yourself as Zephyr.
@@ -330,32 +332,10 @@ TOOLS AVAILABLE
 - get_current_time — current date/time
 - read_file        — read a local file
 - write_file       — write a local file
-- web_search       — DuckDuckGo search (be specific: include dates, versions, names)
-- browse_url       — fetch any webpage (pass the EXACT url given, never modify it)
-- run_python       — run Python code (use httpx for HTTP — NEVER use requests)
-- http_request     — raw HTTP call to any API
-{_MCP_SKILLS_BLOCK}TOOL CALL RULES — follow these precisely
-1. When you decide to use a tool, call it immediately. Never paste JSON or XML tool syntax into your reply.
-2. For browse_url: use the exact URL provided by the user. Do not guess or alter it.
-3. For run_python: always import httpx, never import requests.
-4. For web_search: make your query specific. Add the current year or topic keywords. Never search generic terms.
-5. After getting a tool result, summarise it concisely — don't repeat the raw output verbatim.
-6. For questions about yourself, your tools, your capabilities, or your feelings — answer directly from memory. NEVER call read_file, code_read, or any other tool for introspective questions. Tools are for external data only.
-7. Every tool has a strict parameter list. NEVER invent parameter names. If unsure of the correct parameters, answer without using a tool.
-
-RESPONSE RULES
-- Be concise. One paragraph max unless detail is explicitly requested.
-- If you don't know something, say "I don't know" in one sentence — don't pad.
-- Never say "I'm just an AI" or give disclaimers. Just answer.
-- Never leak raw tool call syntax, JSON brackets, or XML tags into your replies.
-- When the user pastes content (article, post, code, log), analyze that content directly first. Do not search for it unless specific facts are missing.
-- When constructing a web_search query, use the specific names, claims, URLs, or version numbers from the user's message — never use generic topic labels like "something interesting" or "AI news".
-- When you lack evidence to verify a claim, say what the message is asserting, then note what you cannot confirm. Never fill the gap with general prose.
-
-EXAMPLE — correct tool use:
-User: "what's the weather at https://wttr.in/?format=3"
-You think: I should call browse_url with url="https://wttr.in/?format=3"
-[call browse_url] → get result → summarise in one line."""
+- web_search       — DuckDuckGo search
+- browse_url       — fetch any webpage
+- run_python       — run Python code
+- http_request     — raw HTTP call to any API"""
 
 # ─── CLI command handler ──────────────────────────────────────────────────────
 
@@ -370,12 +350,13 @@ CLI_COMMANDS = {
     "/save":      "Save conversation to Obsidian vault — /save [filename]",
     "/clear":     "Clear conversation history",
     "/blackwell": "Enter Zephyr's planning space — he asks, you answer, he grows",
+    "/blackwell axioms": "Set your ground truth — 20-question human-steered axiom interview",
     "/coding-blackwell": "CS-focused planning session — sharpens Zephyr's coding instincts",
     "/keys":      "Manage API keys — /keys setup | list | clear <provider>",
     "/call":      "Consult an external AI — /call [claude|gpt|grok|gemini] <message>",
     "/trajectory": "Show trajectory pair counts and current regret vector",
     "/feedback":   "Mark last response good/bad — /feedback <session_id> <turn> up|down",
-    "/run_lora": "Run LoRA training + GGUF export → registers zephyr-steered in Ollama",
+    "/run_lora": "Run LoRA training + GGUF export → registers prycat in Ollama",
     "/exit":      "Exit Zephyr",
 }
 
@@ -455,7 +436,7 @@ def handle_cli(cmd: str, history: list[dict]) -> tuple[bool, list[dict]]:
 
     elif command == "/status":
         try:
-            resp = httpx.get("http://localhost:11434/api/tags", timeout=5)
+            resp = httpx.get(OLLAMA_TAGS_URL, timeout=5)
             resp.raise_for_status()
             data = resp.json()
             models = [m["name"] for m in data.get("models", [])]
@@ -502,11 +483,11 @@ def handle_cli(cmd: str, history: list[dict]) -> tuple[bool, list[dict]]:
         model_name = arg.strip()
         if model_name:
             MODEL = model_name
-            client = OpenAI(base_url="http://localhost:11434/v1", api_key="ollama")
+            client = OpenAI(base_url=OLLAMA_V1_URL, api_key="ollama")
             print(f"[MODEL] switched to {MODEL}")
         else:
             print(f"\nModel : {MODEL}")
-            print(f"API   : http://localhost:11434/v1")
+            print(f"API   : {OLLAMA_V1_URL}")
             print(f"Team  : Prycat Research\n")
 
     elif command == "/save":
@@ -623,7 +604,18 @@ def handle_cli(cmd: str, history: list[dict]) -> tuple[bool, list[dict]]:
                 })
 
     elif command == "/blackwell":
-        if not LOGGING:
+        # ── /blackwell axioms — human-steered ground truth interview ───────────
+        if arg.strip().lower() == "axioms":
+            try:
+                from blackwell.axiom_interview import run_axiom_interview
+                run_axiom_interview()
+            except ImportError as e:
+                print(f"[axioms] Could not load axiom_interview: {e}\n")
+            except Exception as e:
+                print(f"[axioms] Interview error: {e}\n")
+
+        # ── /blackwell — planning session (default) ────────────────────────────
+        elif not LOGGING:
             print("Blackwell module not available. Check blackwell/ directory.\n")
         else:
             avg_v   = average_payoff_vector()
@@ -656,17 +648,24 @@ def handle_cli(cmd: str, history: list[dict]) -> tuple[bool, list[dict]]:
     elif command == "/run_lora":
         print("[BlackLoRA] Checking training data...\n", flush=True)
         try:
-            from blackwell.lora_steer import run_lora_cycle, check_training_data
-            ok, msg = check_training_data()
-            if not ok:
-                print(f"[BlackLoRA] Not enough data: {msg}\n")
+            from blackwell.lora_steer import run_lora_cycle, check_training_data, check_dependencies
+            # Gate 1: phase-2 deps (unsloth / trl / transformers / datasets)
+            if not check_dependencies():
+                print("[BlackLoRA] Install the packages above, then run /run_lora again.\n")
             else:
-                gguf_dir = run_lora_cycle()
-                if gguf_dir:
-                    from blackwell.export import register_with_ollama
-                    register_with_ollama(gguf_dir)
+                ok, msg = check_training_data()
+                if not ok:
+                    print(f"[BlackLoRA] Not enough data: {msg}\n")
                 else:
-                    print("[BlackLoRA] Training complete. GGUF export was skipped.\n")
+                    gguf_dir = run_lora_cycle()
+                    if gguf_dir:
+                        from blackwell.export import register_with_ollama
+                        register_with_ollama(gguf_dir)
+                    else:
+                        print("[BlackLoRA] Training finished but GGUF export was skipped.\n")
+                        print("[BlackLoRA] Adapter saved. To export manually:\n")
+                        print("  from blackwell.lora_steer import ADAPTER_PATH")
+                        print("  model.save_pretrained_gguf(gguf_dir, tokenizer, quantization_method='q4_k_m')\n")
         except Exception as e:
             print(f"[BlackLoRA] Error: {e}\n")
 
@@ -787,7 +786,7 @@ def main():
     print("Type /help for commands, /exit to quit.\n")
 
     try:
-        httpx.get("http://localhost:11434/api/tags", timeout=5).raise_for_status()
+        httpx.get(OLLAMA_TAGS_URL, timeout=5).raise_for_status()
     except Exception:
         print("ERROR: Ollama is not running. Start it from your system tray.\n")
         input("Press Enter to exit...")

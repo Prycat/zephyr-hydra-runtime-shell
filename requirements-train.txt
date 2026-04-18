@@ -1,0 +1,11 @@
+# LoRA training stack — requires NVIDIA GPU + CUDA 12.4
+# Install after requirements.txt
+# Linux: pip install -r requirements-train.txt
+# Windows: see README — torch must be installed first with the CUDA index URL
+unsloth
+trl
+transformers
+datasets
+accelerate
+peft
+bitsandbytes

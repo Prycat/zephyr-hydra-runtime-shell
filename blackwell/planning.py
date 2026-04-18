@@ -17,7 +17,7 @@ import sys
 import httpx
 import datetime
 
-OLLAMA_URL = "http://localhost:11434/v1/chat/completions"
+from config import OLLAMA_CHAT_URL as OLLAMA_URL
 MODEL = "hermes3:8b"
 WORLD_MODEL_PATH = os.path.join(os.path.dirname(__file__), "world_model.json")
 TRAINING_PATH    = os.path.join(os.path.dirname(__file__), "training_pairs.jsonl")

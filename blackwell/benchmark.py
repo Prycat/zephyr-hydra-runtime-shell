@@ -3,7 +3,7 @@ blackwell/benchmark.py — Capability benchmark for Zephyr model comparison.
 
 Usage:
     python -m blackwell.benchmark --model hermes3:8b       # capture baseline (once)
-    python -m blackwell.benchmark --model zephyr-steered   # score trained model
+    python -m blackwell.benchmark --model prycat   # score trained model
     python -m blackwell.benchmark --compare                # print delta table
 """
 import argparse
@@ -34,7 +34,8 @@ def score_response(response: str, expected_signals: list, forbidden_signals: lis
 
 def run_benchmark(model: str) -> dict:
     """Run all 24 prompts against model, return scored result dict."""
-    client = OpenAI(base_url="http://localhost:11434/v1", api_key="ollama")
+    from config import OLLAMA_V1_URL
+    client = OpenAI(base_url=OLLAMA_V1_URL, api_key="ollama")
     prompts = load_prompts()
     results = []
 
@@ -97,7 +98,7 @@ def compare() -> None:
 
     results = sorted(RESULTS_DIR.glob("benchmark_result_*.json"))
     if not results:
-        print("[benchmark] no result files found -- run with --model zephyr-steered first")
+        print("[benchmark] no result files found -- run with --model prycat first")
         return
 
     baseline = json.loads(BASELINE_PATH.read_text())

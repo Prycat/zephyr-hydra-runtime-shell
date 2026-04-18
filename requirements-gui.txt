@@ -1,0 +1,3 @@
+# GUI dependencies — native install only (not for Docker)
+-r requirements.txt
+PySide6

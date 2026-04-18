@@ -1,0 +1,26 @@
+# Version control
+.git/
+.gitignore
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+
+# Large model files — mounted as volumes at runtime
+blackwell/adapters/merged/
+blackwell/adapters/gguf/
+unsloth_compiled_cache/
+
+# Runtime data — mounted as volumes
+blackwell.db
+blackwell/training_pairs.jsonl
+trajectory_samples.jsonl
+mempalace_db/
+
+# Windows launchers — not needed in container
+*.bat
+
+# Docs — not needed in container
+docs/
