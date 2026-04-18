@@ -7,6 +7,7 @@
 [![HuggingFace](https://img.shields.io/badge/🤗%20Model-Prycat1-yellow)](https://huggingface.co/Prycat/Prycat1)
 [![License](https://img.shields.io/badge/License-MIT-green)](LICENSE)
 [![Python](https://img.shields.io/badge/Python-3.11-blue)](https://python.org)
+[![Announcement](https://img.shields.io/badge/𝕏-Announcement-black)](https://x.com/DIT545songs/status/2045445545305727164)
 
 ---
 
