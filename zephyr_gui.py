@@ -1885,12 +1885,13 @@ def _iso_proj(wx, wy, wz, pcx, pcy, cosY, sinY, cosP, sinP, cam, bias):
 # ═══════════════════════════════════════════════════════════════
 class ThinkingBar(QWidget):
     HEIGHT = 80
-    _CELL_LABELS = ["MODEL",   "/BW CONFIG",  "ORACLE",   "LOAD"]
-    _CELL_VALUES = ["hermes3:8b", "vector accrual", "branch sel.", "inertia cls-v"]
+    _CELL_LABELS = ["MODEL",   "/BW CONFIG",  "ORACLE",   "THINK CFG"]
+    _CELL_VALUES = ["hermes3:8b", "vector accrual", "branch sel.", "system params"]
 
-    model_cell_clicked      = Signal()
-    blackwell_cell_clicked  = Signal()
-    oracle_cell_clicked     = Signal()
+    model_cell_clicked           = Signal()
+    blackwell_cell_clicked       = Signal()
+    oracle_cell_clicked          = Signal()
+    thinking_config_cell_clicked = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -1898,9 +1899,10 @@ class ThinkingBar(QWidget):
         self.setSizePolicy(QSizePolicy.Policy.Expanding,
                            QSizePolicy.Policy.Fixed)
         self.setMouseTracking(True)
-        self._model_cell_hovered     = False
-        self._blackwell_cell_hovered = False
-        self._oracle_cell_hovered    = False
+        self._model_cell_hovered           = False
+        self._blackwell_cell_hovered       = False
+        self._oracle_cell_hovered          = False
+        self._thinking_config_cell_hovered = False
         self._tq_enabled = False
         self._active_model_full = "hermes3:8b"
         self._CELL_VALUES = list(self._CELL_VALUES)  # make instance-level mutable copy
@@ -2040,6 +2042,19 @@ class ThinkingBar(QWidget):
         cell_h   = H - PAD * 2
         return QRect(int(mid_x + (cell_w + cell_gap) * 2), PAD, int(cell_w), int(cell_h))
 
+    def _cell3_rect(self) -> QRect:
+        """Bounding rect of cell 3 (THINK CFG) in local widget coordinates."""
+        W, H = self.width(), self.height()
+        PAD     = 12
+        LEFT_W  = 196
+        RIGHT_W = 200
+        mid_x   = PAD + LEFT_W + 10
+        mid_w   = W - PAD - LEFT_W - 10 - RIGHT_W - 10 - PAD
+        cell_gap = 6
+        cell_w   = max(1, (mid_w - cell_gap * 3) // 4)
+        cell_h   = H - PAD * 2
+        return QRect(int(mid_x + (cell_w + cell_gap) * 3), PAD, int(cell_w), int(cell_h))
+
     # ── Animation ─────────────────────────────────────────────
     @staticmethod
     def _lerp(a, b, t):
@@ -2098,24 +2113,29 @@ class ThinkingBar(QWidget):
         h0 = self._cell0_rect().contains(pos)
         h1 = self._cell1_rect().contains(pos)
         h2 = self._cell2_rect().contains(pos)
+        h3 = self._cell3_rect().contains(pos)
         changed = (h0 != self._model_cell_hovered or
                    h1 != self._blackwell_cell_hovered or
-                   h2 != self._oracle_cell_hovered)
-        self._model_cell_hovered     = h0
-        self._blackwell_cell_hovered = h1
-        self._oracle_cell_hovered    = h2
+                   h2 != self._oracle_cell_hovered or
+                   h3 != self._thinking_config_cell_hovered)
+        self._model_cell_hovered           = h0
+        self._blackwell_cell_hovered       = h1
+        self._oracle_cell_hovered          = h2
+        self._thinking_config_cell_hovered = h3
         if changed:
             self.setCursor(
-                Qt.PointingHandCursor if (h0 or h1 or h2) else Qt.ArrowCursor
+                Qt.PointingHandCursor if (h0 or h1 or h2 or h3) else Qt.ArrowCursor
             )
             self.update()
         super().mouseMoveEvent(e)
 
     def leaveEvent(self, e):
-        if self._model_cell_hovered or self._blackwell_cell_hovered or self._oracle_cell_hovered:
-            self._model_cell_hovered     = False
-            self._blackwell_cell_hovered = False
-            self._oracle_cell_hovered    = False
+        if (self._model_cell_hovered or self._blackwell_cell_hovered or
+                self._oracle_cell_hovered or self._thinking_config_cell_hovered):
+            self._model_cell_hovered           = False
+            self._blackwell_cell_hovered       = False
+            self._oracle_cell_hovered          = False
+            self._thinking_config_cell_hovered = False
             self.setCursor(Qt.ArrowCursor)
             self.update()
 
@@ -2127,6 +2147,8 @@ class ThinkingBar(QWidget):
                 self.blackwell_cell_clicked.emit()
             elif self._cell2_rect().contains(e.pos()):
                 self.oracle_cell_clicked.emit()
+            elif self._cell3_rect().contains(e.pos()):
+                self.thinking_config_cell_clicked.emit()
         super().mousePressEvent(e)
 
     # ── Signal colour ─────────────────────────────────────────
@@ -2252,6 +2274,14 @@ class ThinkingBar(QWidget):
 
                 if i == 1 and self._blackwell_cell_hovered:
                     p.setPen(QPen(QColor("#2a3d62"), 1))
+                    p.drawRect(QRectF(cx, cy, cell_w, cell_h))
+
+                if i == 2 and self._oracle_cell_hovered:
+                    p.setPen(QPen(QColor("#2a4a3a"), 1))
+                    p.drawRect(QRectF(cx, cy, cell_w, cell_h))
+
+                if i == 3 and self._thinking_config_cell_hovered:
+                    p.setPen(QPen(QColor("#2a3a5a"), 1))
                     p.drawRect(QRectF(cx, cy, cell_w, cell_h))
 
                 p.setFont(QFont("Consolas", 7))
