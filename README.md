@@ -31,6 +31,8 @@ You download a model. It's the same model forever. It doesn't matter how much yo
 
 That's the problem Zephyr and BlackLoRA-N solve.
 
+**Why BlackLoRA-N instead of standard QLoRA:** standard QLoRA fine-tunes on a static dataset; BlackLoRA-N computes *which dimension of your specific model is furthest from your target right now*, generates training data aimed exactly there using a creatively-sampled Oracle (temp 0.80) scored by a fully-deterministic Judge (temp 0.00) so their failure modes stay independent, and anchors every gradient update to facts you've personally confirmed are true — so improvement is directed, not diffuse.
+
 ---
 
 ## How It Works
@@ -103,6 +105,36 @@ We almost called it B Set. Then we just called it Blackwell.
 Over 76 scored exchanges spanning 32.5 hours (April 14–16, 2026), the rolling mean regret distance dropped from a peak of **0.8793 to 0.0000**.
 
 ![BlackLoRA-N convergence — d(S) over 76 exchanges](docs/assets/convergence-chart.png)
+
+**What `/trajectory` looks like after a trained run:**
+
+```
+=================================================================
+  /trajectory
+=================================================================
+
+  Training pairs
+  +-- Successful turns logged   :  341
+  +-- Failed turns logged       :   47
+  +-- Explicit feedback signals :   23
+
+=================================================================
+  Blackwell Status Report
+=================================================================
+  Dim           x_bar      Target S   Regret  Progress
+  ---------------------------------------------------------------
+  accuracy      0.947  [0.9, 1.0]    0.0000  [##################..]  OK
+  logic         0.921  [0.8, 1.0]    0.0000  [##################..]  OK
+  tone          0.883  [0.6, 1.0]    0.0000  [#################...]  OK
+  curiosity     0.741  [0.7, 1.0]    0.0000  [##############......]  OK
+  safety        0.982  [0.9, 1.0]    0.0000  [###################.]  OK
+  ---------------------------------------------------------------
+          Total regret  0.0000  (0.0000 = inside Target Set S)
+  Oracle targets   : none -- all dims inside S
+=================================================================
+```
+
+Regenerate the convergence chart from any machine with `python tools/plot_convergence.py`.
 
 | Window (exchanges) | Rolling Mean d(S) |
 |--------------------|-------------------|
