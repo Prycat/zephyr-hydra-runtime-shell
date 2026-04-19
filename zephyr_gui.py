@@ -3069,7 +3069,7 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Zephyr — Prycat Research")
-        self.resize(1100, 700)
+        self.resize(1340, 700)
         self.setMinimumSize(800, 500)
         self.setMouseTracking(True)
 
