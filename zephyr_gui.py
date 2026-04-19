@@ -3092,6 +3092,497 @@ class PaletteWidget(QWidget):
 
 
 # ═══════════════════════════════════════════════════════════════
+#  ConfigSlider — single labelled slider row
+# ═══════════════════════════════════════════════════════════════
+class ConfigSlider(QWidget):
+    """Single labelled slider row: LABEL  [value]  ━━━━━━●"""
+
+    value_changed = Signal(float)
+
+    def __init__(self, label: str, lo: float, hi: float,
+                 value: float, decimals: int = 2, parent=None):
+        super().__init__(parent)
+        self._lo = lo; self._hi = hi; self._decimals = decimals
+        self._dragging = False
+        self.setFixedHeight(26)
+        self.setMouseTracking(True)
+        self._value = max(lo, min(hi, value))
+        self._label = label
+
+    @property
+    def value(self) -> float:
+        return self._value
+
+    def set_value(self, v: float):
+        self._value = max(self._lo, min(self._hi, float(v)))
+        self.update()
+
+    def _track_rect(self):
+        fm = self.fontMetrics()
+        lw = fm.horizontalAdvance("ACCURACY") + 10
+        vw = fm.horizontalAdvance(" 0.000") + 6
+        return QRect(lw + vw + 6, 7, self.width() - lw - vw - 14, 12)
+
+    def paintEvent(self, event):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        fm = p.fontMetrics()
+        W, H = self.width(), self.height()
+        lw = fm.horizontalAdvance("ACCURACY") + 10
+        vw = fm.horizontalAdvance(" 0.000") + 6
+
+        p.setFont(QFont("Consolas", 8))
+        p.setPen(QColor(150, 170, 190, 150))
+        p.drawText(2, H // 2 + 4, self._label)
+
+        p.setPen(QColor(200, 220, 235, 210))
+        val_str = f"{self._value:.{self._decimals}f}" if self._decimals > 0 else str(int(self._value))
+        p.drawText(lw, H // 2 + 4, val_str)
+
+        tr = self._track_rect()
+        p.setPen(QPen(QColor(77, 205, 180, 35), 1))
+        p.setBrush(QBrush(QColor(77, 205, 180, 14)))
+        p.drawRoundedRect(QRectF(tr), 2, 2)
+
+        ratio = (self._value - self._lo) / max(self._hi - self._lo, 1e-9)
+        fx = tr.x() + ratio * tr.width()
+        p.setPen(QPen(QColor(77, 205, 180, 140), 1.5))
+        p.setBrush(Qt.NoBrush)
+        p.drawLine(QPointF(tr.x(), tr.center().y()), QPointF(fx, tr.center().y()))
+        p.setPen(Qt.NoPen)
+        p.setBrush(QBrush(QColor(77, 205, 180, 220)))
+        p.drawEllipse(QPointF(fx, tr.center().y()), 4.5, 4.5)
+
+    def mousePressEvent(self, e):
+        if e.button() == Qt.LeftButton:
+            self._dragging = True
+            self._update_from_mouse(e.pos())
+
+    def mouseMoveEvent(self, e):
+        if self._dragging:
+            self._update_from_mouse(e.pos())
+
+    def mouseReleaseEvent(self, e):
+        self._dragging = False
+
+    def _update_from_mouse(self, pos):
+        tr = self._track_rect()
+        ratio = max(0.0, min(1.0, (pos.x() - tr.x()) / max(tr.width(), 1)))
+        self._value = self._lo + ratio * (self._hi - self._lo)
+        self.update()
+        self.value_changed.emit(self._value)
+
+
+# ═══════════════════════════════════════════════════════════════
+#  AxiomRunnerThread
+# ═══════════════════════════════════════════════════════════════
+class AxiomRunnerThread(QThread):
+    """Runs the 25-probe suite in background."""
+    run_complete = Signal(object)   # ProbeReport
+
+    def run(self):
+        try:
+            from blackwell.probe_runner import run_probe_suite
+            report = run_probe_suite(verbose=False)
+            self.run_complete.emit(report)
+        except Exception as e:
+            print(f"[axiom runner] {e}", flush=True)
+
+
+# ═══════════════════════════════════════════════════════════════
+#  SurfacePanel — enlarged 3D token-timing surface
+# ═══════════════════════════════════════════════════════════════
+class SurfacePanel(QWidget):
+    """Enlarged 3D token-timing surface for ThinkingConfigPanel. Teal grid lines."""
+
+    def __init__(self, bar, parent=None):
+        super().__init__(parent)
+        self._bar = bar
+        self.setMinimumSize(380, 180)
+        self._timer = QTimer(self)
+        self._timer.timeout.connect(self.update)
+        self._timer.setInterval(32)
+        self._timer.start()
+
+    def paintEvent(self, event):
+        import math
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        W, H = self.width(), self.height()
+
+        p.setPen(Qt.NoPen)
+        p.setBrush(QBrush(QColor("#060a0e")))
+        p.drawRoundedRect(QRectF(0, 0, W, H), 4, 4)
+
+        p.setPen(QPen(QColor(77, 205, 180, 60), 1))
+        p.setBrush(Qt.NoBrush)
+        p.drawRoundedRect(QRectF(0.5, 0.5, W - 1, H - 1), 4, 4)
+
+        GRID_X = GRID_Z = 10
+        CELL   = 36.0
+        MAX_H  = 55.0
+        _YAW   = math.pi / 4
+        _PITCH = -0.20
+        _CAM   = 300.0
+        _BIAS  = 160.0
+        _cosY = math.cos(_YAW); _sinY = math.sin(_YAW)
+        _cosP = math.cos(_PITCH); _sinP = math.sin(_PITCH)
+        _pcx  = W * 0.50
+        _pcy  = H * 0.72
+
+        _hf = self._bar._surface_heights()
+        if not self._bar._active:
+            frame = self._bar._frame
+            _pulse = 0.08 * (0.5 + 0.5 * math.sin(frame * 0.025))
+            _hf = [[min(1.0, v + _pulse) for v in row] for row in _hf]
+
+        _quads = []
+        _half  = (GRID_X - 1) / 2.0
+        for iz in range(GRID_Z - 1):
+            for ix in range(GRID_X - 1):
+                wx0 = (ix     - _half) * CELL
+                wx1 = (ix + 1 - _half) * CELL
+                wz0 = (iz     - _half) * CELL
+                wz1 = (iz + 1 - _half) * CELL
+                h00 = _hf[iz  ][ix  ] * MAX_H
+                h10 = _hf[iz  ][ix+1] * MAX_H
+                h11 = _hf[iz+1][ix+1] * MAX_H
+                h01 = _hf[iz+1][ix  ] * MAX_H
+                a = _iso_proj(wx0,-h00,wz0,_pcx,_pcy,_cosY,_sinY,_cosP,_sinP,_CAM,_BIAS)
+                b = _iso_proj(wx1,-h10,wz0,_pcx,_pcy,_cosY,_sinY,_cosP,_sinP,_CAM,_BIAS)
+                c = _iso_proj(wx1,-h11,wz1,_pcx,_pcy,_cosY,_sinY,_cosP,_sinP,_CAM,_BIAS)
+                d = _iso_proj(wx0,-h01,wz1,_pcx,_pcy,_cosY,_sinY,_cosP,_sinP,_CAM,_BIAS)
+                avg_depth = (a[2]+b[2]+c[2]+d[2])*0.25
+                avg_h     = (h00+h10+h11+h01)*0.25
+                _quads.append((avg_depth, avg_h, a, b, c, d))
+
+        _quads.sort(key=lambda q: q[0])
+
+        for _dep, _ah, _a, _b, _c, _d in _quads:
+            _inten = min(1.0, _ah / MAX_H)
+            _path  = QPainterPath()
+            _path.moveTo(QPointF(_a[0], _a[1]))
+            _path.lineTo(QPointF(_b[0], _b[1]))
+            _path.lineTo(QPointF(_c[0], _c[1]))
+            _path.lineTo(QPointF(_d[0], _d[1]))
+            _path.closeSubpath()
+            p.setPen(Qt.NoPen)
+            p.setBrush(QBrush(QColor(77, 205, 180, int(8 + _inten * 70))))
+            p.drawPath(_path)
+            p.setPen(QPen(QColor(77, 205, 180, int(14 + _inten * 50)), 0.6))
+            p.setBrush(Qt.NoBrush)
+            p.drawPath(_path)
+
+        for _dep, _ah, _a, _b, _c, _d in _quads:
+            _inten = min(1.0, _ah / MAX_H)
+            if _inten < 0.18:
+                continue
+            _qcx = (_a[0]+_b[0]+_c[0]+_d[0])*0.25
+            _qcy = (_a[1]+_b[1]+_c[1]+_d[1])*0.25
+            _rg  = 5.0 + _inten * 14.0
+            _gg  = QRadialGradient(QPointF(_qcx, _qcy), _rg)
+            _gg.setColorAt(0, QColor(77, 205, 180, int(80 * _inten)))
+            _gg.setColorAt(1, QColor(0, 0, 0, 0))
+            p.setPen(Qt.NoPen)
+            p.setBrush(QBrush(_gg))
+            p.drawEllipse(QPointF(_qcx, _qcy), _rg, _rg)
+
+        p.setFont(QFont("Consolas", 7))
+        p.setPen(QColor(77, 205, 180, 80))
+        p.drawText(6, H - 6, "TOKEN →")
+        p.drawText(W - 54, H - 6, "GAP ↑")
+
+
+# ═══════════════════════════════════════════════════════════════
+#  ThinkingConfigPanel — cell 3 overlay
+# ═══════════════════════════════════════════════════════════════
+class ThinkingConfigPanel(QWidget):
+    """
+    Full overlay for runtime parameter tuning, enlarged 3D surface,
+    STOP control, and axiom regression runner.
+    Triggered by ThinkingBar cell 3 (THINK CFG).
+    """
+
+    stop_requested = Signal()
+
+    _BG     = QColor("#090c10")
+    _BORDER = QColor("#1a2a3a")
+    _TEAL   = QColor("#4dcdb4")
+    _DIM    = QColor("#5a6a7a")
+    _TEXT   = QColor("#c8d8e8")
+    _W, _H  = 820, 520
+
+    def __init__(self, thinking_bar, parent=None):
+        super().__init__(parent, Qt.Tool | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)
+        self._bar = thinking_bar
+        self.setFixedSize(self._W, self._H)
+        self.setFont(QFont("Consolas", 9))
+        self._save_btn = None   # set in _build_ui
+        self._build_ui()
+        self.hide()
+
+    def _build_ui(self):
+        root = QVBoxLayout(self)
+        root.setContentsMargins(14, 12, 14, 12)
+        root.setSpacing(8)
+
+        # Header
+        hdr = QLabel("THINKING CONFIG")
+        hdr.setStyleSheet(
+            f"color: {self._TEAL.name()}; font-size: 11px; font-weight: bold; letter-spacing: 3px;"
+        )
+        root.addWidget(hdr)
+
+        # Body row — left: surface + inference sliders | right: param sliders + axiom runner
+        body = QHBoxLayout()
+        body.setSpacing(12)
+
+        # Left column
+        left = QVBoxLayout()
+        left.setSpacing(6)
+        self._surface = SurfacePanel(self._bar)
+        left.addWidget(self._surface)
+        left.addStretch()
+
+        # Right column
+        right = QVBoxLayout()
+        right.setSpacing(4)
+        right.addStretch()
+
+        body.addLayout(left, 50)
+        body.addLayout(right, 50)
+        root.addLayout(body, 1)
+
+        # Populate sliders into left and right columns
+        self._populate_sliders(left, right)
+
+        # Axiom runner section in right column
+        self._build_axiom_section(right)
+
+        # Bottom strip
+        bottom = QHBoxLayout()
+        bottom.setSpacing(10)
+
+        stop_btn = QPushButton("■  STOP")
+        stop_btn.setFixedHeight(36)
+        stop_btn.setStyleSheet("""
+            QPushButton {
+                background: rgba(255,80,80,0.10);
+                color: rgba(255,120,120,0.9);
+                border: 1px solid rgba(255,80,80,0.35);
+                border-radius: 4px;
+                font-family: Consolas, monospace;
+                font-size: 10px;
+                letter-spacing: 2px;
+                padding: 0 16px;
+            }
+            QPushButton:hover {
+                background: rgba(255,80,80,0.22);
+                border-color: rgba(255,80,80,0.60);
+            }
+            QPushButton:pressed { background: rgba(255,80,80,0.08); }
+        """)
+        stop_btn.clicked.connect(self.stop_requested.emit)
+        stop_btn.clicked.connect(self.hide)
+
+        self._status_lbl = QLabel("status: READY")
+        self._status_lbl.setStyleSheet("color: rgba(150,170,190,0.6); font-size: 8px;")
+
+        self._save_btn = QPushButton("SAVE CONFIG")
+        self._save_btn.setFixedHeight(36)
+        self._save_btn.setStyleSheet("""
+            QPushButton {
+                background: rgba(77,205,180,0.10);
+                color: rgba(128,221,202,0.9);
+                border: 1px solid rgba(77,205,180,0.25);
+                border-radius: 4px;
+                font-family: Consolas, monospace;
+                font-size: 10px;
+                letter-spacing: 2px;
+                padding: 0 16px;
+            }
+            QPushButton:hover {
+                background: rgba(77,205,180,0.22);
+                border-color: rgba(77,205,180,0.45);
+            }
+        """)
+        self._save_btn.clicked.connect(self._save_config)
+
+        bottom.addWidget(stop_btn)
+        bottom.addStretch()
+        bottom.addWidget(self._status_lbl)
+        bottom.addStretch()
+        bottom.addWidget(self._save_btn)
+        root.addLayout(bottom)
+
+    def _populate_sliders(self, left_col: QVBoxLayout, right_col: QVBoxLayout):
+        """Build ConfigSlider widgets and add them to the appropriate columns."""
+        from blackwell.config_loader import load_thinking_config
+        _cfg = load_thinking_config()
+
+        def _section(col, title):
+            lbl = QLabel(title)
+            lbl.setStyleSheet(
+                "color: rgba(77,205,180,0.45); font-size: 7px; "
+                "letter-spacing: 2px; padding-top: 4px; font-family: Consolas;"
+            )
+            col.addWidget(lbl)
+
+        def _slider(col, label, lo, hi, val, decimals=2):
+            s = ConfigSlider(label, lo, hi, val, decimals)
+            col.addWidget(s)
+            return s
+
+        # Left column — INFERENCE (below surface)
+        _section(left_col, "INFERENCE")
+        self._sl_m_temp = _slider(left_col, "MDL TEMP", 0.0, 2.0, _cfg.model_temperature)
+        self._sl_o_temp = _slider(left_col, "ORC TEMP", 0.0, 1.0, _cfg.oracle_temperature)
+
+        # Right column — APPROACHABILITY
+        _section(right_col, "APPROACHABILITY")
+        self._sl_s_low    = _slider(right_col, "S_LOW",   -1.0, 0.0,  _cfg.s_bound_low,        3)
+        self._sl_s_high   = _slider(right_col, "S_HIGH",   0.0, 1.0,  _cfg.s_bound_high,       3)
+        self._sl_regret   = _slider(right_col, "REGRET",   0.0, 0.5,  _cfg.regret_threshold,   2)
+        self._sl_window   = _slider(right_col, "WINDOW",   5,  100,   _cfg.convergence_window,  0)
+
+        # Right column — JUDGE
+        _section(right_col, "JUDGE")
+        self._sl_j_temp   = _slider(right_col, "TEMP",     0.0, 1.0,  _cfg.judge_temperature,  2)
+        self._sl_safety   = _slider(right_col, "SAFETY",   0.5, 1.0,  _cfg.safety_floor,       2)
+        self._sl_accuracy = _slider(right_col, "ACCURACY", 0.5, 1.0,  _cfg.accuracy_floor,     2)
+
+    def _build_axiom_section(self, col: QVBoxLayout):
+        """Add axiom regression runner widgets to the given column layout."""
+        hdr_row = QHBoxLayout()
+        lbl = QLabel("AXIOM REGRESSION")
+        lbl.setStyleSheet(
+            "color: rgba(77,205,180,0.45); font-size: 7px; letter-spacing: 2px; font-family: Consolas;"
+        )
+        self._axiom_run_btn = QPushButton("RUN")
+        self._axiom_run_btn.setFixedSize(44, 22)
+        self._axiom_run_btn.setStyleSheet("""
+            QPushButton {
+                background: rgba(77,205,180,0.12);
+                color: rgba(128,221,202,0.9);
+                border: 1px solid rgba(77,205,180,0.3);
+                border-radius: 3px;
+                font-family: Consolas; font-size: 8px; letter-spacing: 1px;
+            }
+            QPushButton:hover { background: rgba(77,205,180,0.22); }
+            QPushButton:disabled { color: rgba(128,221,202,0.3); }
+        """)
+        hdr_row.addWidget(lbl)
+        hdr_row.addStretch()
+        hdr_row.addWidget(self._axiom_run_btn)
+        col.addLayout(hdr_row)
+
+        self._axiom_score = QLabel("—")
+        self._axiom_score.setFont(QFont("Consolas", 8))
+        self._axiom_score.setStyleSheet("color: rgba(200,220,235,0.6);")
+        col.addWidget(self._axiom_score)
+
+        self._axiom_grid = QLabel("")
+        self._axiom_grid.setFont(QFont("Consolas", 7))
+        self._axiom_grid.setStyleSheet("color: rgba(160,185,205,0.65);")
+        self._axiom_grid.setWordWrap(True)
+        col.addWidget(self._axiom_grid)
+
+        self._axiom_thread = None
+        self._axiom_run_btn.clicked.connect(self._run_axiom_check)
+
+    def _run_axiom_check(self):
+        self._axiom_run_btn.setEnabled(False)
+        self._axiom_score.setText("running…")
+        self._axiom_grid.setText("")
+        self._axiom_thread = AxiomRunnerThread(self)
+        self._axiom_thread.run_complete.connect(self._on_axiom_done)
+        self._axiom_thread.start()
+
+    def _on_axiom_done(self, report):
+        self._axiom_run_btn.setEnabled(True)
+        pct   = report.pass_rate * 100
+        total = report.total
+        passed = report.passed
+        if pct >= 95:
+            colour, status = "#4dcdb4", "REGRESSION CLEAR"
+        elif pct >= 85:
+            colour, status = "#e0a030", "MARGINAL"
+        else:
+            colour, status = "#e04040", "SILENT FORGETTING DETECTED"
+        self._axiom_score.setText(f"{passed}/{total}  {pct:.1f}%  —  {status}")
+        self._axiom_score.setStyleSheet(f"color: {colour}; font-size: 8px; font-weight: bold; font-family: Consolas;")
+        lines = []
+        for r in report.results:
+            mark = "✓" if r.passed else "✗"
+            lines.append(f"{r.probe_id:<14}{mark}")
+        mid = len(lines) // 2
+        paired = []
+        for i in range(mid):
+            right = lines[i + mid] if i + mid < len(lines) else ""
+            paired.append(f"{lines[i]:<20}{right}")
+        self._axiom_grid.setText("\n".join(paired))
+
+    def _save_config(self):
+        """Write current slider values back to thinking_config.yaml atomically."""
+        import yaml as _yaml
+        path = os.path.join(
+            os.path.dirname(os.path.abspath(__file__)),
+            "blackwell", "thinking_config.yaml"
+        )
+        data = {
+            "inference": {
+                "model_temperature":  round(self._sl_m_temp.value, 3),
+                "oracle_temperature": round(self._sl_o_temp.value, 3),
+                "max_tokens": 512,
+            },
+            "judge": {
+                "temperature":    round(self._sl_j_temp.value,  3),
+                "safety_floor":   round(self._sl_safety.value,  3),
+                "accuracy_floor": round(self._sl_accuracy.value,3),
+            },
+            "approachability": {
+                "s_bound_low":        round(self._sl_s_low.value,   3),
+                "s_bound_high":       round(self._sl_s_high.value,  3),
+                "regret_threshold":   round(self._sl_regret.value,  3),
+                "convergence_window": int(self._sl_window.value),
+            },
+            "training": {
+                "abort_logic_ratio":  0.50,
+                "abort_overall_floor":0.60,
+                "min_pairs": 200,
+            },
+        }
+        try:
+            tmp = path + ".tmp"
+            with open(tmp, "w", encoding="utf-8") as f:
+                _yaml.dump(data, f, default_flow_style=False, sort_keys=False)
+            os.replace(tmp, path)
+            self._save_btn.setText("SAVED ✓")
+            QTimer.singleShot(600, lambda: self._save_btn.setText("SAVE CONFIG"))
+        except Exception as exc:
+            self._save_btn.setText("ERROR")
+            QTimer.singleShot(1500, lambda: self._save_btn.setText("SAVE CONFIG"))
+
+    def set_status(self, text: str):
+        self._status_lbl.setText(f"status: {text}")
+
+    def keyPressEvent(self, e):
+        if e.key() == Qt.Key_Escape:
+            self.hide()
+        super().keyPressEvent(e)
+
+    def paintEvent(self, event):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        W, H = self.width(), self.height()
+        p.setPen(QPen(self._BORDER, 1))
+        p.setBrush(QBrush(self._BG))
+        p.drawRoundedRect(QRectF(0.5, 0.5, W - 1, H - 1), 8, 8)
+        p.setPen(QPen(self._TEAL, 2))
+        p.drawLine(QPointF(20, 1), QPointF(W - 20, 1))
+
+
+# ═══════════════════════════════════════════════════════════════
 #  MainWindow
 # ═══════════════════════════════════════════════════════════════
 class MainWindow(QMainWindow):
@@ -3164,6 +3655,11 @@ class MainWindow(QMainWindow):
         self._oracle_card = OracleSwitcherCard()
         self._oracle_card.oracle_selected.connect(self._on_oracle_selected)
         self._thinking_bar.oracle_cell_clicked.connect(self._show_oracle_card)
+
+        # Thinking config panel — cell 3
+        self._thinking_config_panel = ThinkingConfigPanel(self._thinking_bar)
+        self._thinking_config_panel.stop_requested.connect(self._on_stop_requested)
+        self._thinking_bar.thinking_config_cell_clicked.connect(self._show_thinking_config_panel)
 
         # Model download card — shared by both model pickers
         self._download_card = ModelDownloadCard()
@@ -3367,6 +3863,32 @@ class MainWindow(QMainWindow):
         card_pos.setY(max(screen.top(), card_pos.y()))
         card_pos.setX(min(card_pos.x(), screen.right() - OracleSwitcherCard._WIDTH - 4))
         self._oracle_card.show_at(card_pos, self._oracle_model)
+
+    def _show_thinking_config_panel(self):
+        """Position and show ThinkingConfigPanel centred above the ThinkingBar."""
+        panel = self._thinking_config_panel
+        bar_global = self._thinking_bar.mapToGlobal(QPoint(0, 0))
+        bar_w = self._thinking_bar.width()
+        px = bar_global.x() + bar_w // 2 - panel.width() // 2
+        py = bar_global.y() - panel.height() - 4
+        panel.move(px, max(0, py))
+        panel.show()
+        panel.raise_()
+        panel.activateWindow()
+
+    def _on_stop_requested(self):
+        """Kill the agent subprocess and reset ThinkingBar to READY."""
+        for attr in ("_process", "_zproc", "_agent_proc", "_proc"):
+            proc = getattr(self, attr, None)
+            if proc is not None:
+                try:
+                    proc.terminate()
+                except Exception:
+                    pass
+                break
+        self._thinking_bar.stop()
+        if hasattr(self, "_thinking_config_panel"):
+            self._thinking_config_panel.set_status("INTERRUPTED")
 
     def _on_oracle_selected(self, model_name: str):
         """Persist the chosen oracle model to config."""
