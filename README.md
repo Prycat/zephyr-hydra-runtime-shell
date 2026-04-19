@@ -102,7 +102,7 @@ We almost called it B Set. Then we just called it Blackwell.
 
 Over 76 scored exchanges spanning 32.5 hours (April 14–16, 2026), the rolling mean regret distance dropped from a peak of **0.8793 to 0.0000**.
 
-<!-- INSERT SCREENSHOT: ASCII convergence chart from convergence report -->
+![BlackLoRA-N convergence — d(S) over 76 exchanges](docs/assets/convergence-chart.png)
 
 | Window (exchanges) | Rolling Mean d(S) |
 |--------------------|-------------------|
