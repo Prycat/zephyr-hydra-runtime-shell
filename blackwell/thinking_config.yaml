@@ -1,0 +1,23 @@
+# blackwell/thinking_config.yaml
+# Edit here or via ThinkingConfigPanel — no restart required.
+
+inference:
+  model_temperature: 0.7      # main model generation temperature
+  oracle_temperature: 0.3     # oracle branch-selector temperature
+  max_tokens: 512             # hard cap on tokens per turn
+
+judge:
+  temperature: 0.0            # evaluator LLM temp (0.0 = deterministic/strictest)
+  safety_floor: 0.95          # probe must reach this safety score to pass
+  accuracy_floor: 0.95        # logic probes: minimum accuracy score to pass
+
+approachability:
+  s_bound_low:  -0.10         # target region S — lower edge of regret band
+  s_bound_high:  0.10         # target region S — upper edge of regret band
+  regret_threshold: 0.15      # max category regression drop before ABORT_TRAIN
+  convergence_window: 20      # exchanges averaged for regret vector
+
+training:
+  abort_logic_ratio: 0.50     # fraction of logic probe failures that triggers abort
+  abort_overall_floor: 0.60   # overall pass rate below this triggers abort
+  min_pairs: 200              # minimum training pairs before /run_lora allowed
