@@ -12,6 +12,10 @@ import tempfile
 import os
 import httpx
 from openai import OpenAI
+from tools_security import (
+    check_path, check_url, safe_eval, safe_python_env, safe_python_argv,
+    FILE_SANDBOX_ROOT,
+)
 
 # Provider key vault
 try:
@@ -173,17 +177,16 @@ TOOLS = [
 # ─── Tool implementations ────────────────────────────────────────────────────
 
 def calculate(expression: str) -> str:
-    safe_ns = {k: getattr(math, k) for k in dir(math) if not k.startswith("_")}
-    safe_ns["__builtins__"] = {}
-    try:
-        return str(eval(expression, safe_ns))  # noqa: S307
-    except Exception as e:
-        return f"Error: {e}"
+    # AST-validated evaluator — no eval() escape via __subclasses__
+    return safe_eval(expression)
 
 def get_current_time() -> str:
     return datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
 def read_file(path: str) -> str:
+    err = check_path(path, write=False)
+    if err:
+        return err
     try:
         with open(path, "r", encoding="utf-8") as f:
             return f.read()
@@ -191,7 +194,11 @@ def read_file(path: str) -> str:
         return f"Error reading file: {e}"
 
 def write_file(path: str, content: str) -> str:
+    err = check_path(path, write=True)
+    if err:
+        return err
     try:
+        os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
         with open(path, "w", encoding="utf-8") as f:
             f.write(content)
         return f"Written to {path}"
@@ -223,8 +230,11 @@ def browse_url(url: str) -> str:
         from bs4 import BeautifulSoup
         if not url.startswith("http://") and not url.startswith("https://"):
             return f"Error: URL must start with http:// or https://. Got: {url!r}"
+        err = check_url(url)
+        if err:
+            return err
         headers = {"User-Agent": "Mozilla/5.0 (compatible; Zephyr-Agent/1.0)"}
-        resp = httpx.get(url, headers=headers, timeout=10, follow_redirects=True)
+        resp = httpx.get(url, headers=headers, timeout=10, follow_redirects=False)
         resp.raise_for_status()
         soup = BeautifulSoup(resp.text, "html.parser")
         for tag in soup(["script", "style", "nav", "footer", "header", "aside"]):
@@ -245,20 +255,36 @@ def run_python(code: str) -> str:
         with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False, encoding="utf-8") as f:
             f.write(code)
             tmp_path = f.name
-        result = subprocess.run(["python", tmp_path], capture_output=True, text=True, timeout=10)
+        # -I (isolated): ignores PYTHONPATH, user site-packages, PYTHON* env vars
+        # -S (no site):  skips site.py — smaller attack surface
+        # safe_python_env(): strips API keys / secrets from the subprocess env
+        result = subprocess.run(
+            safe_python_argv() + [tmp_path],
+            capture_output=True,
+            text=True,
+            timeout=15,
+            env=safe_python_env(),
+        )
         os.unlink(tmp_path)
         output = result.stdout
         if result.stderr:
             output += f"\nSTDERR:\n{result.stderr}"
         return output.strip() or "(no output)"
     except subprocess.TimeoutExpired:
-        return "Error: timed out after 10 seconds."
+        try:
+            os.unlink(tmp_path)
+        except Exception:
+            pass
+        return "Error: timed out after 15 seconds."
     except Exception as e:
         return f"Error: {e}"
 
 def http_request(method: str, url: str, headers: dict = None, body: str = None) -> str:
     try:
-        kwargs = {"timeout": 15, "follow_redirects": True}
+        err = check_url(url)
+        if err:
+            return err
+        kwargs = {"timeout": 15, "follow_redirects": False}
         if headers:
             kwargs["headers"] = headers
         if body:
@@ -378,15 +404,17 @@ def handle_cli(cmd: str, history: list[dict]) -> tuple[bool, list[dict]]:
 
     elif command == "/tools":
         print("\nZephyr's Tools:")
+        print(f"  [sandbox] File I/O root : {FILE_SANDBOX_ROOT}")
+        print(f"            Override      : set ZEPHYR_FILE_ROOT env var\n")
         tool_info = [
-            ("calculate",        "Evaluate math expressions"),
+            ("calculate",        "Evaluate math expressions (AST-safe, no eval escape)"),
             ("get_current_time", "Get current date and time"),
-            ("read_file",        "Read a local file"),
-            ("write_file",       "Write a local file"),
+            ("read_file",        "Read a file inside the sandbox root"),
+            ("write_file",       "Write a file inside the sandbox root"),
             ("web_search",       "Search the web with DuckDuckGo"),
-            ("browse_url",       "Fetch and read any webpage"),
-            ("run_python",       "Execute Python code snippets"),
-            ("http_request",     "Make raw HTTP API calls"),
+            ("browse_url",       "Fetch and read any webpage (SSRF-guarded)"),
+            ("run_python",       "Execute Python code (isolated subprocess, secrets stripped)"),
+            ("http_request",     "Make raw HTTP API calls (SSRF-guarded)"),
         ]
         if MCP_AVAILABLE:
             tool_info += [
@@ -493,13 +521,18 @@ def handle_cli(cmd: str, history: list[dict]) -> tuple[bool, list[dict]]:
     elif command == "/save":
         vault_dir = r"C:\Users\gamer23\Desktop\vault 1\all zephyr conversations"
         timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H-%M-%S")
-        base_name = arg if arg else f"Zephyr {timestamp}"
-        # Ensure .md extension
+        # Strip any path separators from the filename arg — names only, no traversal
+        raw_name = arg if arg else f"Zephyr {timestamp}"
+        base_name = os.path.basename(raw_name)  # drop any directory component
         if not base_name.endswith(".md"):
             base_name += ".md"
         try:
             os.makedirs(vault_dir, exist_ok=True)
             filepath = os.path.join(vault_dir, base_name)
+            # Confirm resolved path is still inside vault_dir
+            if not os.path.realpath(filepath).startswith(os.path.realpath(vault_dir) + os.sep):
+                print("Error: filename resolves outside the vault directory.\n")
+                return True, history
             with open(filepath, "w", encoding="utf-8") as f:
                 # Obsidian frontmatter
                 f.write(f"---\n")
