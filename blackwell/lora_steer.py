@@ -505,7 +505,8 @@ def _run_drift_gate() -> bool:
     print("[BlackLoRA] Checking Oracle-Evaluator drift state (Fix B)...")
     try:
         from blackwell.drift_monitor import check_drift, print_drift_report
-        state = check_drift()
+        from blackwell.config_loader import load_thinking_config as _ltc
+        state = check_drift(threshold=_ltc().drift_gap_threshold)
         if state.drift_detected and state.abort_train:
             print_drift_report(state)
             print("[BlackLoRA] !! DRIFT GATE BLOCKED TRAINING !!", flush=True)

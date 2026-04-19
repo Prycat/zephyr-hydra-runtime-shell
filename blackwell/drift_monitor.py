@@ -256,6 +256,38 @@ def load_drift_state() -> DriftState | None:
         return None
 
 
+# ── Baseline reset ───────────────────────────────────────────────────────────
+
+def reset_drift_baseline() -> str:
+    """
+    Wipe the gap_log table and delete drift_state.json.
+
+    Use this after a deliberate model checkpoint or after auditing and
+    confirming the judge inflation was not genuine co-evolution.
+    Returns a human-readable status string.
+    """
+    messages = []
+    try:
+        _ensure_gap_table()
+        with _connect() as conn:
+            conn.execute("DELETE FROM gap_log")
+            conn.commit()
+        messages.append("gap_log cleared (all historical gap data removed)")
+    except Exception as e:
+        messages.append(f"gap_log clear failed: {e}")
+
+    try:
+        if os.path.exists(DRIFT_STATE_PATH):
+            os.remove(DRIFT_STATE_PATH)
+            messages.append("drift_state.json deleted")
+        else:
+            messages.append("drift_state.json not present (nothing to delete)")
+    except Exception as e:
+        messages.append(f"drift_state.json delete failed: {e}")
+
+    return " | ".join(messages)
+
+
 # ── Summary printer ───────────────────────────────────────────────────────────
 
 def print_drift_report(state: DriftState) -> None:

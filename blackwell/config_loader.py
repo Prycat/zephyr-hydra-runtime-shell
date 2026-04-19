@@ -33,6 +33,7 @@ _DEFAULTS = {
         "abort_logic_ratio": 0.50,
         "abort_overall_floor": 0.60,
         "min_pairs": 200,
+        "drift_gap_threshold": 0.25,
     },
 }
 
@@ -56,6 +57,7 @@ class ThinkingConfig:
     abort_logic_ratio:   float
     abort_overall_floor: float
     min_pairs:           int
+    drift_gap_threshold: float
 
 
 def load_thinking_config(path: str | None = None) -> ThinkingConfig:
@@ -90,6 +92,7 @@ def load_thinking_config(path: str | None = None) -> ThinkingConfig:
             abort_logic_ratio   = float(_get("training", "abort_logic_ratio")),
             abort_overall_floor = float(_get("training", "abort_overall_floor")),
             min_pairs           = int(_get("training",   "min_pairs")),
+            drift_gap_threshold = float(_get("training", "drift_gap_threshold")),
         )
     except Exception:
         # Bad values in YAML (e.g. model_temperature: "high") — return pure defaults
@@ -107,4 +110,5 @@ def load_thinking_config(path: str | None = None) -> ThinkingConfig:
             abort_logic_ratio   = 0.50,
             abort_overall_floor = 0.60,
             min_pairs           = 200,
+            drift_gap_threshold = 0.25,
         )

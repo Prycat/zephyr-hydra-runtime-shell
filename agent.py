@@ -382,8 +382,9 @@ CLI_COMMANDS = {
     "/call":      "Consult an external AI — /call [claude|gpt|grok|gemini] <message>",
     "/trajectory": "Show trajectory pair counts and current regret vector",
     "/feedback":   "Mark last response good/bad — /feedback <session_id> <turn> up|down",
-    "/run_lora": "Run LoRA training + GGUF export → registers prycat in Ollama",
-    "/exit":      "Exit Zephyr",
+    "/run_lora":    "Run LoRA training + GGUF export → registers prycat in Ollama",
+    "/reset_drift": "Wipe drift baseline — use after auditing judge inflation or after a checkpoint",
+    "/exit":        "Exit Zephyr",
 }
 
 def handle_cli(cmd: str, history: list[dict]) -> tuple[bool, list[dict]]:
@@ -705,6 +706,15 @@ def handle_cli(cmd: str, history: list[dict]) -> tuple[bool, list[dict]]:
                     print(f"\n[BlackLoRA] Training exited with code {result.returncode}.\n")
             except Exception as e:
                 print(f"[BlackLoRA] Error launching training: {e}\n")
+
+    elif command == "/reset_drift":
+        try:
+            from blackwell.drift_monitor import reset_drift_baseline
+            msg = reset_drift_baseline()
+            print(f"\n[drift] Baseline reset: {msg}")
+            print("[drift] Drift monitor will start fresh on next /run_lora.\n")
+        except Exception as e:
+            print(f"[drift] Reset failed: {e}\n")
 
     elif command in ("/exit", "/quit"):
         print("Bye!")

@@ -21,3 +21,5 @@ training:
   abort_logic_ratio: 0.50     # fraction of logic probe failures that triggers abort
   abort_overall_floor: 0.60   # overall pass rate below this triggers abort
   min_pairs: 200              # minimum training pairs before /run_lora allowed
+  drift_gap_threshold: 0.25   # LLM-judge vs rule-layer gap that triggers drift abort
+                              # 0.10=sensitive  0.20=balanced  0.25=default  0.30=tolerant
