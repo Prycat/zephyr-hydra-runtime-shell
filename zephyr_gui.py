@@ -3560,6 +3560,11 @@ class ThinkingConfigPanel(QWidget):
             self._save_btn.setText("SAVED ✓")
             QTimer.singleShot(600, lambda: self._save_btn.setText("SAVE CONFIG"))
         except Exception as exc:
+            print(f"[ThinkingConfigPanel] save_config failed: {exc}", flush=True)
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
             self._save_btn.setText("ERROR")
             QTimer.singleShot(1500, lambda: self._save_btn.setText("SAVE CONFIG"))
 
@@ -3877,15 +3882,11 @@ class MainWindow(QMainWindow):
         panel.activateWindow()
 
     def _on_stop_requested(self):
-        """Kill the agent subprocess and reset ThinkingBar to READY."""
-        for attr in ("_process", "_zproc", "_agent_proc", "_proc"):
-            proc = getattr(self, attr, None)
-            if proc is not None:
-                try:
-                    proc.terminate()
-                except Exception:
-                    pass
-                break
+        """Gracefully stop the agent process and reset ThinkingBar to READY."""
+        try:
+            self._process.stop()
+        except Exception:
+            pass
         self._thinking_bar.stop()
         if hasattr(self, "_thinking_config_panel"):
             self._thinking_config_panel.set_status("INTERRUPTED")
