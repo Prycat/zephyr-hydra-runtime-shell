@@ -61,8 +61,8 @@ class ThinkingConfig:
 def load_thinking_config(path: str | None = None) -> ThinkingConfig:
     """
     Load thinking_config.yaml, merge with hardcoded defaults.
-    Missing keys never raise — returns defaults for anything absent.
-    Safe to call on every request; file read is fast.
+    Missing keys, bad YAML, or type-incompatible values all fall through
+    to defaults — never raises.
     """
     raw: dict = {}
     try:
@@ -75,18 +75,36 @@ def load_thinking_config(path: str | None = None) -> ThinkingConfig:
     def _get(section: str, key: str):
         return (raw.get(section) or {}).get(key, _DEFAULTS[section][key])
 
-    return ThinkingConfig(
-        model_temperature  = float(_get("inference", "model_temperature")),
-        oracle_temperature = float(_get("inference", "oracle_temperature")),
-        max_tokens         = int(_get("inference",   "max_tokens")),
-        judge_temperature  = float(_get("judge",     "temperature")),
-        safety_floor       = float(_get("judge",     "safety_floor")),
-        accuracy_floor     = float(_get("judge",     "accuracy_floor")),
-        s_bound_low        = float(_get("approachability", "s_bound_low")),
-        s_bound_high       = float(_get("approachability", "s_bound_high")),
-        regret_threshold   = float(_get("approachability", "regret_threshold")),
-        convergence_window = int(_get("approachability",   "convergence_window")),
-        abort_logic_ratio   = float(_get("training", "abort_logic_ratio")),
-        abort_overall_floor = float(_get("training", "abort_overall_floor")),
-        min_pairs           = int(_get("training",   "min_pairs")),
-    )
+    try:
+        return ThinkingConfig(
+            model_temperature  = float(_get("inference", "model_temperature")),
+            oracle_temperature = float(_get("inference", "oracle_temperature")),
+            max_tokens         = int(_get("inference",   "max_tokens")),
+            judge_temperature  = float(_get("judge",     "temperature")),
+            safety_floor       = float(_get("judge",     "safety_floor")),
+            accuracy_floor     = float(_get("judge",     "accuracy_floor")),
+            s_bound_low        = float(_get("approachability", "s_bound_low")),
+            s_bound_high       = float(_get("approachability", "s_bound_high")),
+            regret_threshold   = float(_get("approachability", "regret_threshold")),
+            convergence_window = int(_get("approachability",   "convergence_window")),
+            abort_logic_ratio   = float(_get("training", "abort_logic_ratio")),
+            abort_overall_floor = float(_get("training", "abort_overall_floor")),
+            min_pairs           = int(_get("training",   "min_pairs")),
+        )
+    except Exception:
+        # Bad values in YAML (e.g. model_temperature: "high") — return pure defaults
+        return ThinkingConfig(
+            model_temperature  = 0.7,
+            oracle_temperature = 0.3,
+            max_tokens         = 512,
+            judge_temperature  = 0.0,
+            safety_floor       = 0.95,
+            accuracy_floor     = 0.95,
+            s_bound_low        = -0.10,
+            s_bound_high       = 0.10,
+            regret_threshold   = 0.15,
+            convergence_window = 20,
+            abort_logic_ratio   = 0.50,
+            abort_overall_floor = 0.60,
+            min_pairs           = 200,
+        )
