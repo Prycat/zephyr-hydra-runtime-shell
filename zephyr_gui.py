@@ -3105,6 +3105,7 @@ class ConfigSlider(QWidget):
         self._lo = lo; self._hi = hi; self._decimals = decimals
         self._dragging = False
         self.setFixedHeight(26)
+        self.setMinimumWidth(160)
         self.setMouseTracking(True)
         self._value = max(lo, min(hi, value))
         self._label = label

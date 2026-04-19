@@ -270,8 +270,8 @@ def evaluate_exchange(human: str, zephyr: str) -> dict:
             OLLAMA_URL,
             json={
                 "model": MODEL,
-                # Fix D: temperature=0.0 → deterministic judge, correctness-biased.
-                # Strictly lower than the Oracle's 0.80 to decorrelate error modes.
+                # Fix D: judge_temperature from thinking_config.yaml (default 0.0 = deterministic).
+                # Kept low for correctness bias; configurable via ThinkingConfigPanel.
                 "messages": [
                     {"role": "system", "content": JUDGE_SYSTEM_PROMPT},
                     {"role": "user",   "content": prompt},
