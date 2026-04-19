@@ -679,28 +679,32 @@ def handle_cli(cmd: str, history: list[dict]) -> tuple[bool, list[dict]]:
                 print("  Coding world model injected into context.\n")
 
     elif command == "/run_lora":
-        print("[BlackLoRA] Checking training data...\n", flush=True)
-        try:
-            from blackwell.lora_steer import run_lora_cycle, check_training_data, check_dependencies
-            # Gate 1: phase-2 deps (unsloth / trl / transformers / datasets)
-            if not check_dependencies():
-                print("[BlackLoRA] Install the packages above, then run /run_lora again.\n")
-            else:
-                ok, msg = check_training_data()
-                if not ok:
-                    print(f"[BlackLoRA] Not enough data: {msg}\n")
+        # Training requires Python 3.10+ (unsloth_zoo uses X|Y union syntax).
+        # Spawn as a subprocess under py -3.11 so it never runs in the 3.9 agent.
+        import shutil
+        py311 = shutil.which("py")  # Windows py launcher
+        py_cmd = [py311, "-3.11"] if py311 else None
+        if not py311:
+            # Fallback: try explicit path
+            _p = r"C:\Users\gamer23\AppData\Local\Programs\Python\Python311\python.exe"
+            if os.path.exists(_p):
+                py_cmd = [_p]
+        if not py_cmd:
+            print("[BlackLoRA] Python 3.11 not found. Install it from python.org.\n")
+        else:
+            print("[BlackLoRA] Launching training under Python 3.11...\n", flush=True)
+            try:
+                result = subprocess.run(
+                    py_cmd + ["-m", "blackwell.lora_steer"],
+                    cwd=os.path.dirname(os.path.abspath(__file__)),
+                    text=True,
+                )
+                if result.returncode == 0:
+                    print("\n[BlackLoRA] Training complete. Run /model to switch to prycat.\n")
                 else:
-                    gguf_dir = run_lora_cycle()
-                    if gguf_dir:
-                        from blackwell.export import register_with_ollama
-                        register_with_ollama(gguf_dir)
-                    else:
-                        print("[BlackLoRA] Training finished but GGUF export was skipped.\n")
-                        print("[BlackLoRA] Adapter saved. To export manually:\n")
-                        print("  from blackwell.lora_steer import ADAPTER_PATH")
-                        print("  model.save_pretrained_gguf(gguf_dir, tokenizer, quantization_method='q4_k_m')\n")
-        except Exception as e:
-            print(f"[BlackLoRA] Error: {e}\n")
+                    print(f"\n[BlackLoRA] Training exited with code {result.returncode}.\n")
+            except Exception as e:
+                print(f"[BlackLoRA] Error launching training: {e}\n")
 
     elif command in ("/exit", "/quit"):
         print("Bye!")
