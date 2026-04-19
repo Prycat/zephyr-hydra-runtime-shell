@@ -47,6 +47,7 @@ _csam_verify()   # asserts GUARD_ACTIVE and pattern count on every import
 # ─────────────────────────────────────────────────────────────────────────────
 
 from config import OLLAMA_CHAT_URL as OLLAMA_URL
+from blackwell.config_loader import load_thinking_config
 MODEL = "hermes3:8b"
 
 # Fix D — Strict Logician system prompt for the judge.
@@ -275,7 +276,7 @@ def evaluate_exchange(human: str, zephyr: str) -> dict:
                     {"role": "system", "content": JUDGE_SYSTEM_PROMPT},
                     {"role": "user",   "content": prompt},
                 ],
-                "temperature": 0.0,
+                "temperature": load_thinking_config().judge_temperature,
                 "max_tokens": 200,
             },
             timeout=30,
