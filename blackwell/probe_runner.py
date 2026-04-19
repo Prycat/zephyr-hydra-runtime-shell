@@ -40,6 +40,7 @@ Category weights:
   tone     — advisory (failure logged, does not block training alone)
   antinomy — advisory (failure logged, contributes to overall pass rate)
 """
+from __future__ import annotations
 
 import json
 import os

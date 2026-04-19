@@ -16,6 +16,7 @@ What it does:
 The adapter must already exist (training must have completed).
 Re-running this after a failed /run_lora export is safe — it does NOT retrain.
 """
+from __future__ import annotations
 
 import os
 import sys

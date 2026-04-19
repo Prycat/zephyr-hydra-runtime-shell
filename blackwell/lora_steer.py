@@ -25,6 +25,7 @@ Usage:
     py -3.11 blackwell/lora_steer.py
     py -3.11 blackwell/lora_steer.py --check
 """
+from __future__ import annotations
 
 import sys
 import os

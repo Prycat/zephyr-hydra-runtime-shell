@@ -31,6 +31,7 @@ WINDOW_SIZE:
 Usage:
   from blackwell.drift_monitor import record_scores, check_drift, DriftState
 """
+from __future__ import annotations
 
 import json
 import os

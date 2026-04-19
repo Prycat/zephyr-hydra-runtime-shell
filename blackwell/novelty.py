@@ -10,6 +10,7 @@ High novelty + low regret   → archive as positive anchor for replay.
 
 No external dependencies — uses stdlib math + Counter only.
 """
+from __future__ import annotations
 
 import math
 import re

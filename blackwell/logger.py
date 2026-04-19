@@ -21,6 +21,7 @@ EMA_ALPHA tuning guide:
     0.15  — balanced (default)
     0.30  — responsive, reacts within ~10 exchanges (good for rapid iteration)
 """
+from __future__ import annotations
 
 import sqlite3
 import json
