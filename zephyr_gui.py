@@ -3327,12 +3327,37 @@ class ThinkingConfigPanel(QWidget):
         root.setContentsMargins(14, 12, 14, 12)
         root.setSpacing(8)
 
-        # Header
+        # Header row — title + close button
+        hdr_row = QHBoxLayout()
+        hdr_row.setContentsMargins(0, 0, 0, 0)
         hdr = QLabel("THINKING CONFIG")
         hdr.setStyleSheet(
             f"color: {self._TEAL.name()}; font-size: 11px; font-weight: bold; letter-spacing: 3px;"
         )
-        root.addWidget(hdr)
+        close_btn = QPushButton("✕")
+        close_btn.setFixedSize(24, 24)
+        close_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        close_btn.setToolTip("Close")
+        close_btn.setStyleSheet("""
+            QPushButton {
+                background: transparent;
+                color: rgba(180, 190, 200, 0.5);
+                border: none;
+                font-size: 13px;
+                padding: 0;
+            }
+            QPushButton:hover {
+                color: rgba(255, 100, 100, 0.9);
+            }
+            QPushButton:pressed {
+                color: rgba(255, 60, 60, 1.0);
+            }
+        """)
+        close_btn.clicked.connect(self.hide)
+        hdr_row.addWidget(hdr)
+        hdr_row.addStretch()
+        hdr_row.addWidget(close_btn)
+        root.addLayout(hdr_row)
 
         # Body row — left: surface + inference sliders | right: param sliders + axiom runner
         body = QHBoxLayout()
