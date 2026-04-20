@@ -100,6 +100,37 @@ def _export(model, tokenizer) -> str | None:
     return None
 
 
+def _patch_chat_template(model_dir: str) -> None:
+    """
+    Ollama's Go parser expects chat_template to be either a plain string or an
+    array of {name, template} objects.  Newer transformers saves it as a dict
+    ({name: template, ...}), which causes:
+        'invalid chat_template: json: cannot unmarshal object into Go value …'
+
+    This patches tokenizer_config.json in-place (backing up the original) so
+    ollama create can proceed.  Safe to call multiple times — checks format first.
+    """
+    import json as _json
+    import shutil as _shutil
+    tc_path = os.path.join(model_dir, "tokenizer_config.json")
+    if not os.path.exists(tc_path):
+        return
+    try:
+        with open(tc_path, encoding="utf-8") as f:
+            tc = _json.load(f)
+        ct = tc.get("chat_template")
+        if not isinstance(ct, dict):
+            return   # already a string or array — nothing to do
+        _shutil.copy(tc_path, tc_path + ".bak")
+        tc["chat_template"] = [{"name": k, "template": v} for k, v in ct.items()]
+        with open(tc_path, "w", encoding="utf-8") as f:
+            _json.dump(tc, f, ensure_ascii=False, indent=2)
+        print(f"[export_gguf] Patched chat_template dict→array "
+              f"({list(ct.keys())}) in tokenizer_config.json", flush=True)
+    except Exception as e:
+        print(f"[export_gguf] Warning: could not patch chat_template: {e}", flush=True)
+
+
 def _register(output_dir: str):
     """
     Register with Ollama.  If output_dir contains a .gguf, use it directly.
@@ -122,7 +153,9 @@ def _register(output_dir: str):
         # Ollama accepts a directory path — it converts internally
         from_line = f"FROM {os.path.abspath(output_dir)}"
         print(f"[export_gguf] Using merged HF directory (Ollama will convert)...", flush=True)
-        print(f"[export_gguf] Note: first run of ollama create may take 5-10 min to quantize.", flush=True)
+        print(f"[export_gguf] Note: first run of ollama create may take 15-20 min to quantize.", flush=True)
+        # Patch chat_template format before Ollama tries to parse it
+        _patch_chat_template(output_dir)
     else:
         print(f"[export_gguf] ERROR: No .gguf or .safetensors found in {output_dir}", flush=True)
         return False
