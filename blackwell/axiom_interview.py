@@ -332,7 +332,7 @@ def run_axiom_interview() -> list[dict]:
         abort_note = "  → >50% failure ABORTS training" if cat == "logic" else "  → advisory" if cat == "tone" else "  → must take a position"
         print(f"    {cat:<12} {n} probes{abort_note}")
     print()
-    print("  CSAM probes are excluded — those are non-negotiable and fixed.")
+    print("  Safety probes are excluded — those are non-negotiable and fixed.")
     print()
 
     try:
