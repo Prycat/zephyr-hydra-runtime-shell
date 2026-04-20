@@ -383,7 +383,8 @@ CLI_COMMANDS = {
     "/trajectory": "Show trajectory pair counts and current regret vector",
     "/feedback":   "Mark last response good/bad — /feedback <session_id> <turn> up|down",
     "/run_lora":    "Run LoRA training + GGUF export → registers prycat in Ollama",
-    "/reset_drift": "Wipe drift baseline — use after auditing judge inflation or after a checkpoint",
+    "/reset_drift":   "Wipe drift baseline — use after auditing judge inflation or after a checkpoint",
+    "/repair_axioms": "Restore axioms corrupted by paste artifacts to probes.jsonl defaults",
     "/exit":        "Exit Zephyr",
 }
 
@@ -715,6 +716,15 @@ def handle_cli(cmd: str, history: list[dict]) -> tuple[bool, list[dict]]:
             print("[drift] Drift monitor will start fresh on next /run_lora.\n")
         except Exception as e:
             print(f"[drift] Reset failed: {e}\n")
+
+    elif command == "/repair_axioms":
+        try:
+            from blackwell.axiom_interview import repair_axioms_from_probes
+            msg = repair_axioms_from_probes()
+            print(f"\n[axioms] {msg}\n")
+            print("[axioms] Re-run '/blackwell axioms' to set your ground truth cleanly.\n")
+        except Exception as e:
+            print(f"[axioms] Repair failed: {e}\n")
 
     elif command in ("/exit", "/quit"):
         print("Bye!")

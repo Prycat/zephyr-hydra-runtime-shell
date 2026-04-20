@@ -31,6 +31,7 @@ After this interview, the probe set reflects the actual user's ground truth.
 
 import json
 import os
+import sys
 import time
 import httpx
 from typing import Optional
@@ -62,6 +63,35 @@ def _ansi(text: str, code: str) -> str:
         return f"{code}{text}{_R}"
     except Exception:
         return text
+
+
+def _drain_console_buffer() -> None:
+    """
+    Windows: when a user pastes multi-line text, the extra lines sit in the
+    console input buffer and get consumed by subsequent input() calls, silently
+    auto-confirming every probe they didn't intend to answer.
+
+    After each input() call, drain any remaining characters from the console
+    buffer so the next probe starts clean.
+
+    On non-Windows this is a no-op — Unix terminals handle paste differently.
+    """
+    if sys.platform != "win32":
+        return
+    try:
+        import msvcrt
+        time.sleep(0.06)          # let any trailing paste chars arrive
+        count = 0
+        while msvcrt.kbhit():
+            msvcrt.getwch()       # consume without echoing
+            count += 1
+        if count:
+            print(_ansi(
+                f"  [note: {count} buffered char(s) from paste discarded — "
+                "re-type if needed]", _DIM
+            ), flush=True)
+    except Exception:
+        pass
 
 
 # ── Model call ────────────────────────────────────────────────────────────────
@@ -221,6 +251,7 @@ def _interview_one(probe: dict, axiom_index: dict[str, dict],
 
     try:
         raw = input(prompt).strip()
+        _drain_console_buffer()   # prevent paste artifacts from polluting next probe
     except (EOFError, KeyboardInterrupt):
         raw = ""
 
@@ -306,6 +337,7 @@ def run_axiom_interview() -> list[dict]:
 
     try:
         input(_ansi("  Press Enter to begin, Ctrl+C to cancel: ", _B))
+        _drain_console_buffer()   # flush anything pasted before the interview starts
     except (EOFError, KeyboardInterrupt):
         print("\n  Interview cancelled.")
         return []
@@ -386,6 +418,101 @@ def _answers_diverge(ai_answer: str, axiom: str) -> bool:
     # Non-numeric: flag if AI answer is very short compared to axiom
     ratio = len(ai_answer.split()) / max(len(axiom.split()), 1)
     return ratio < 0.2
+
+
+# ── Axiom repair (restore garbage axioms to probes.jsonl defaults) ───────────
+
+def repair_axioms_from_probes() -> str:
+    """
+    Detect and repair axiom_pairs.jsonl entries whose 'value' looks like a
+    paste artifact (very short fragment, e.g. "Let:", "Ball = x", "2x=0.10").
+
+    Restoration priority:
+      1. human_axioms.jsonl — the trinary log records 'system_axiom' (the
+         correct value BEFORE the bad override).  This is the most accurate
+         source for recently-corrupted entries.
+      2. If no trinary record exists, mark the entry as needing review.
+
+    Returns a human-readable summary of what was fixed.
+    """
+    import re
+
+    # ── Build a {probe_id: system_axiom} map from the trinary log ─────────────
+    # The trinary log entry for a probe stores the axiom that was displayed to
+    # the human BEFORE they (accidentally) updated it.  That's the correct value.
+    pre_update: dict[str, str] = {}
+    if os.path.exists(HUMAN_AXIOMS_PATH):
+        with open(HUMAN_AXIOMS_PATH, encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    rec = json.loads(line)
+                    pid = rec.get("probe_id")
+                    sys_axiom = rec.get("system_axiom", "")
+                    if pid and sys_axiom:
+                        # Keep the FIRST trinary record per probe (it was the
+                        # original value before any interview ran).
+                        pre_update.setdefault(pid, sys_axiom)
+                except json.JSONDecodeError:
+                    pass
+
+    # ── Scan axiom_pairs.jsonl for suspect entries ─────────────────────────────
+    axiom_index = _load_axiom_index()
+    repaired: list[str] = []
+    skipped: list[str] = []
+
+    def _looks_like_fragment(v: str) -> bool:
+        v = v.strip()
+        if len(v) > 60:
+            return False   # long enough to be intentional
+        if v.endswith((".", "?", "!")):
+            return False   # proper sentence ending
+        return (
+            v.endswith(":")                                   # "Solve:"
+            or bool(re.match(r"^[A-Za-z ]+\s*=\s*[\$\d]", v))  # "Ball = $0.05"
+            or bool(re.match(r"^\d+x[\+\-=]", v))            # "2x=0.10"
+            or bool(re.match(r"^x[\+\-\(=]", v))             # "x+(x+1.00)=1.10"
+            or bool(re.match(r"^[A-Z][a-z]+ = ", v))         # "Bat = x+1.00"
+            or (len(v) <= 40 and not any(c in v for c in " ,.;"))  # bare token
+        )
+
+    for pid, obj in axiom_index.items():
+        convos = obj.get("conversations", [])
+        if len(convos) < 2:
+            continue
+        value: str = convos[1].get("value", "")
+
+        if obj.get("human_authored") and _looks_like_fragment(value):
+            original = pre_update.get(pid)
+            if original:
+                convos[1]["value"] = original
+                obj["human_authored"] = False
+                obj.pop("human_updated_at", None)
+                axiom_index[pid] = obj
+                repaired.append(
+                    f"{pid}: '{value[:35]}' → restored original axiom"
+                )
+            else:
+                skipped.append(
+                    f"{pid}: fragment '{value[:35]}' detected but no trinary "
+                    "record found — manual fix needed"
+                )
+
+    if repaired or skipped:
+        _save_axiom_index(axiom_index)
+
+    lines = []
+    if repaired:
+        lines.append(f"Repaired {len(repaired)} corrupt axiom(s):")
+        lines.extend(f"  {r}" for r in repaired)
+    if skipped:
+        lines.append(f"Skipped {len(skipped)} (no source to restore from):")
+        lines.extend(f"  {s}" for s in skipped)
+    if not repaired and not skipped:
+        lines.append("No suspect axioms found — all look clean.")
+    return "\n".join(lines)
 
 
 # ── Trinary reader (for drift_monitor integration) ────────────────────────────
