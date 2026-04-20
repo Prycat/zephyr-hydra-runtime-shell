@@ -171,15 +171,25 @@ def _register(output_dir: str):
         return False
 
 
-def _register(gguf_dir: str):
-    try:
-        sys.path.insert(0, os.path.dirname(_HERE))
-        from blackwell.export import register_with_ollama
-        register_with_ollama(gguf_dir)
-    except Exception as e:
-        print(f"[export_gguf] Ollama registration failed: {e}", flush=True)
-        print("  You can register manually:")
-        print(f"  ollama create prycat -f {os.path.join(_HERE, 'Modelfile')}")
+def _find_existing_output() -> str | None:
+    """
+    Return the directory to register if weights already exist on disk,
+    so we can skip the expensive model-load + merge step on re-runs.
+
+    Priority:
+      1. GGUF_DIR — has .gguf files (unsloth Q4_K_M export succeeded previously)
+      2. MERGED_DIR — has .safetensors files (merged HF weights from training run)
+    """
+    import glob
+    if os.path.isdir(GGUF_DIR) and glob.glob(os.path.join(GGUF_DIR, "*.gguf")):
+        print(f"[export_gguf] Found existing GGUF weights at {GGUF_DIR} — skipping model load.",
+              flush=True)
+        return GGUF_DIR
+    if os.path.isdir(MERGED_DIR) and glob.glob(os.path.join(MERGED_DIR, "*.safetensors")):
+        print(f"[export_gguf] Found existing merged weights at {MERGED_DIR} — skipping model load.",
+              flush=True)
+        return MERGED_DIR
+    return None
 
 
 if __name__ == "__main__":
@@ -190,8 +200,13 @@ if __name__ == "__main__":
     print()
 
     _check_adapter()
-    model, tokenizer = _load_model_and_adapter()
-    output_dir = _export(model, tokenizer)
+
+    # Fast-path: if a previous run already produced weights, skip the
+    # 10-minute model load + merge and jump straight to Ollama registration.
+    output_dir = _find_existing_output()
+    if output_dir is None:
+        model, tokenizer = _load_model_and_adapter()
+        output_dir = _export(model, tokenizer)
 
     if output_dir:
         print()
