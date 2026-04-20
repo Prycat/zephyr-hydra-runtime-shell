@@ -141,7 +141,8 @@ def _register(output_dir: str):
     try:
         result = subprocess.run(
             ["ollama", "create", MODEL_NAME, "-f", MODELFILE_PATH],
-            text=True, capture_output=True, timeout=600,
+            encoding="utf-8", errors="replace", capture_output=True,
+            timeout=1800,   # 30 min — quantising an 8B from safetensors takes ~15-20 min
         )
         if result.stdout:
             for line in result.stdout.splitlines():
