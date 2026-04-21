@@ -53,12 +53,18 @@ def build_macro_states(
     """
     if data is not None:
         X = np.asarray(data, dtype=float)
+        if X.ndim != 2 or X.shape[1] != len(DIMS):
+            raise ValueError(
+                f"data must have shape (n, {len(DIMS)}), got {X.shape}"
+            )
+        if np.isnan(X).any():
+            raise ValueError("Score matrix contains NaN values — check upstream data source")
     else:
-        con = sqlite3.connect(DB_PATH)
-        rows = con.execute(
-            f"SELECT {','.join(DIMS)} FROM exchanges WHERE v_accuracy IS NOT NULL"
-        ).fetchall()
-        con.close()
+        null_checks = " AND ".join(f"{d} IS NOT NULL" for d in DIMS)
+        with sqlite3.connect(DB_PATH) as con:
+            rows = con.execute(
+                f"SELECT {','.join(DIMS)} FROM exchanges WHERE {null_checks}"
+            ).fetchall()
         X = np.array(rows, dtype=float)
 
     if len(X) < k:

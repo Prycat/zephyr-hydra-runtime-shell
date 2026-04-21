@@ -2,7 +2,7 @@
 import numpy as np
 import pytest
 
-from blackwell.prime_state_compiler import build_macro_states
+from blackwell.prime_state_compiler import build_macro_states, DB_PATH
 
 
 def _synthetic_data(n: int = 50) -> np.ndarray:
@@ -37,6 +37,7 @@ def test_build_macro_states_raises_when_too_few_rows():
         build_macro_states(k=5, data=data)
 
 
+@pytest.mark.skipif(not DB_PATH.exists(), reason="blackwell.db not present")
 def test_build_macro_states_reads_real_db():
     """Smoke test: real DB must have enough scored rows to cluster."""
     result = build_macro_states(k=5)
