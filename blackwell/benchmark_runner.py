@@ -51,29 +51,33 @@ def _ensure_score_table() -> None:
     Create benchmark_scores and benchmark_cycle tables if they do not exist.
     Also seeds the single benchmark_cycle row (id=1, cycle_count=0).
     """
-    with _connect() as conn:
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS benchmark_scores (
-                id          INTEGER PRIMARY KEY AUTOINCREMENT,
-                benchmark   TEXT    NOT NULL,
-                score       REAL    NOT NULL,
-                n_problems  INTEGER NOT NULL,
-                n_correct   INTEGER NOT NULL,
-                timestamp   TEXT    NOT NULL,
-                model_name  TEXT    NOT NULL
-            )
-        """)
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS benchmark_cycle (
-                id          INTEGER PRIMARY KEY CHECK(id = 1),
-                cycle_count INTEGER NOT NULL DEFAULT 0
-            )
-        """)
-        conn.execute("""
-            INSERT OR IGNORE INTO benchmark_cycle (id, cycle_count)
-            VALUES (1, 0)
-        """)
-        conn.commit()
+    conn = _connect()
+    try:
+        with conn:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS benchmark_scores (
+                    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                    benchmark   TEXT    NOT NULL,
+                    score       REAL    NOT NULL,
+                    n_problems  INTEGER NOT NULL,
+                    n_correct   INTEGER NOT NULL,
+                    timestamp   TEXT    NOT NULL,
+                    model_name  TEXT    NOT NULL
+                )
+            """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS benchmark_cycle (
+                    id          INTEGER PRIMARY KEY CHECK(id = 1),
+                    cycle_count INTEGER NOT NULL DEFAULT 0
+                )
+            """)
+            conn.execute("""
+                INSERT OR IGNORE INTO benchmark_cycle (id, cycle_count)
+                VALUES (1, 0)
+            """)
+            conn.commit()
+    finally:
+        conn.close()
 
 
 def save_score(
@@ -94,21 +98,26 @@ def save_score(
     n_correct  : number answered correctly
     model_name : model that was evaluated (defaults to STUDENT_MODEL)
     """
-    _ensure_score_table()
+    if benchmark not in BASELINES:
+        raise ValueError(f"Unknown benchmark: {benchmark!r}. Valid: {BENCHMARK_NAMES}")
     ts = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-    with _connect() as conn:
-        conn.execute(
-            """
-            INSERT INTO benchmark_scores
-                (benchmark, score, n_problems, n_correct, timestamp, model_name)
-            VALUES (?, ?, ?, ?, ?, ?)
-            """,
-            (benchmark, score, n_problems, n_correct, ts, model_name),
-        )
-        conn.execute(
-            "UPDATE benchmark_cycle SET cycle_count = cycle_count + 1 WHERE id = 1"
-        )
-        conn.commit()
+    conn = _connect()
+    try:
+        with conn:
+            conn.execute(
+                """
+                INSERT INTO benchmark_scores
+                    (benchmark, score, n_problems, n_correct, timestamp, model_name)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (benchmark, score, n_problems, n_correct, ts, model_name),
+            )
+            conn.execute(
+                "UPDATE benchmark_cycle SET cycle_count = cycle_count + 1 WHERE id = 1"
+            )
+            conn.commit()
+    finally:
+        conn.close()
 
 
 def get_last_scores() -> dict[str, dict | None]:
@@ -120,9 +129,9 @@ def get_last_scores() -> dict[str, dict | None]:
     dict mapping each benchmark name to a dict of its latest row fields,
     or None if that benchmark has never been run.
     """
-    _ensure_score_table()
     result: dict[str, dict | None] = {name: None for name in BENCHMARK_NAMES}
-    with _connect() as conn:
+    conn = _connect()
+    try:
         for name in BENCHMARK_NAMES:
             row = conn.execute(
                 """
@@ -137,17 +146,21 @@ def get_last_scores() -> dict[str, dict | None]:
             ).fetchone()
             if row is not None:
                 result[name] = dict(row)
+    finally:
+        conn.close()
     return result
 
 
 def get_cycle_count() -> int:
     """Return the total number of save_score() calls recorded so far."""
-    _ensure_score_table()
-    with _connect() as conn:
+    conn = _connect()
+    try:
         row = conn.execute(
             "SELECT cycle_count FROM benchmark_cycle WHERE id = 1"
         ).fetchone()
         return int(row["cycle_count"]) if row else 0
+    finally:
+        conn.close()
 
 
 def get_score_history(benchmark: str, limit: int = 10) -> list[dict]:
@@ -163,8 +176,8 @@ def get_score_history(benchmark: str, limit: int = 10) -> list[dict]:
     -------
     List of row dicts ordered most-recent first.
     """
-    _ensure_score_table()
-    with _connect() as conn:
+    conn = _connect()
+    try:
         rows = conn.execute(
             """
             SELECT id, benchmark, score, n_problems, n_correct,
@@ -177,3 +190,9 @@ def get_score_history(benchmark: str, limit: int = 10) -> list[dict]:
             (benchmark, limit),
         ).fetchall()
         return [dict(row) for row in rows]
+    finally:
+        conn.close()
+
+
+# Run once on import so the schema is always ready before any function is called.
+_ensure_score_table()
