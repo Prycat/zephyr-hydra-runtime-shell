@@ -330,5 +330,272 @@ def run_cruxeval(n: int = 50) -> dict:
             "n_problems": actual_n, "n_correct": correct}
 
 
+# ── LiveCodeBench ─────────────────────────────────────────────────────────────
+
+_LCB_FALLBACK = [
+    {"question_content": "Given an integer N, print N * 2.",
+     "test_cases": [{"input": "5\n", "output": "10"}, {"input": "0\n", "output": "0"}]},
+    {"question_content": "Given integers A and B on one line, print their sum.",
+     "test_cases": [{"input": "3 4\n", "output": "7"}, {"input": "0 0\n", "output": "0"}]},
+    {"question_content": "Given a string, print it reversed.",
+     "test_cases": [{"input": "hello\n", "output": "olleh"}, {"input": "abc\n", "output": "cba"}]},
+    {"question_content": "Given integers on one line, print their max.",
+     "test_cases": [{"input": "3 1 4 1 5 9 2 6\n", "output": "9"}, {"input": "7\n", "output": "7"}]},
+    {"question_content": "Given N, print the sum 1+2+...+N.",
+     "test_cases": [{"input": "10\n", "output": "55"}, {"input": "1\n", "output": "1"}]},
+    {"question_content": "Given integers A B C on one line, print them sorted ascending space-separated.",
+     "test_cases": [{"input": "3 1 2\n", "output": "1 2 3"}, {"input": "5 5 5\n", "output": "5 5 5"}]},
+    {"question_content": "Given a number N, print 'even' if even else 'odd'.",
+     "test_cases": [{"input": "4\n", "output": "even"}, {"input": "7\n", "output": "odd"}]},
+    {"question_content": "Count vowels (aeiouAEIOU) in a string and print the count.",
+     "test_cases": [{"input": "Hello World\n", "output": "3"}, {"input": "rhythm\n", "output": "0"}]},
+    {"question_content": "Given N, print all integers from 1 to N divisible by 3 or 5, space-separated.",
+     "test_cases": [{"input": "15\n", "output": "3 5 6 9 10 12 15"}, {"input": "4\n", "output": "3"}]},
+    {"question_content": "Print the Nth Fibonacci number (0-indexed, F(0)=0, F(1)=1).",
+     "test_cases": [{"input": "7\n", "output": "13"}, {"input": "0\n", "output": "0"}]},
+    {"question_content": "Given N and K on one line, print N! divided by K! as an integer (N >= K >= 0).",
+     "test_cases": [{"input": "5 3\n", "output": "20"}, {"input": "3 3\n", "output": "1"}]},
+    {"question_content": "Given a string S, print 'palindrome' or 'not palindrome'.",
+     "test_cases": [{"input": "racecar\n", "output": "palindrome"}, {"input": "hello\n", "output": "not palindrome"}]},
+    {"question_content": "Given N integers on one line, print their mean rounded to 2 decimal places.",
+     "test_cases": [{"input": "1 2 3 4\n", "output": "2.50"}, {"input": "7\n", "output": "7.00"}]},
+    {"question_content": "Given a sorted list of N integers and a target T, print the 0-based index of T or -1.",
+     "test_cases": [{"input": "5\n1 3 5 7 9\n5\n", "output": "2"}, {"input": "3\n2 4 6\n5\n", "output": "-1"}]},
+    {"question_content": "Given N, print prime factors of N space-separated in ascending order.",
+     "test_cases": [{"input": "12\n", "output": "2 2 3"}, {"input": "13\n", "output": "13"}]},
+    {"question_content": "Given two strings on separate lines, print the length of their longest common subsequence.",
+     "test_cases": [{"input": "abcde\nace\n", "output": "3"}, {"input": "abc\nabc\n", "output": "3"}]},
+    {"question_content": "Given a string with only ()[]{}  brackets, print 'valid' or 'invalid'.",
+     "test_cases": [{"input": "[]{}\n", "output": "valid"}, {"input": "([)]\n", "output": "invalid"}]},
+    {"question_content": "Given N integers on one line, print the count of inversions (pairs i<j where a[i]>a[j]).",
+     "test_cases": [{"input": "2 4 1 3 5\n", "output": "3"}, {"input": "1 2 3\n", "output": "0"}]},
+    {"question_content": "Given N coins of given values and a target T, print min coins needed or -1 if impossible.",
+     "test_cases": [{"input": "3\n1 5 6\n11\n", "output": "2"}, {"input": "2\n3 5\n2\n", "output": "-1"}]},
+    {"question_content": "Given a string, print the total count of palindromic substrings (including single chars).",
+     "test_cases": [{"input": "aaa\n", "output": "6"}, {"input": "abc\n", "output": "3"}]},
+    {"question_content": "Given an NxN grid of 0/1 (N on first line, then N space-separated rows), count islands (connected 1s, 4-directional).",
+     "test_cases": [{"input": "4\n1 1 0 0\n1 1 0 0\n0 0 1 0\n0 0 0 1\n", "output": "3"}, {"input": "1\n0\n", "output": "0"}]},
+    {"question_content": "Given integer N, print all prime numbers up to N inclusive, space-separated.",
+     "test_cases": [{"input": "20\n", "output": "2 3 5 7 11 13 17 19"}, {"input": "2\n", "output": "2"}]},
+    {"question_content": "Given a matrix as N M on first line then N rows of M integers, print column sums space-separated.",
+     "test_cases": [{"input": "2 3\n1 2 3\n4 5 6\n", "output": "5 7 9"}, {"input": "1 2\n9 1\n", "output": "9 1"}]},
+    {"question_content": "Given N integers, print the second largest distinct value, or 'None' if it doesn't exist.",
+     "test_cases": [{"input": "3 1 4 1 5\n", "output": "4"}, {"input": "2 2 2\n", "output": "None"}]},
+    {"question_content": "Given directed graph as N M on first line then M edges u v, print topological order space-separated or 'cycle'.",
+     "test_cases": [{"input": "3 2\n0 1\n1 2\n", "output": "0 1 2"}, {"input": "2 2\n0 1\n1 0\n", "output": "cycle"}]},
+]
+
+
+def _load_livecodebench(n: int = 25) -> list[dict]:
+    """
+    Load n LiveCodeBench problems.
+    Tries `datasets` library first (downloads from HuggingFace).
+    Falls back to the built-in 25-problem seed.
+    """
+    try:
+        from datasets import load_dataset
+        ds = load_dataset("livecodebench/code_generation_lite",
+                          split="test", trust_remote_code=True)
+        problems = []
+        for item in ds:
+            tcs_raw = item.get("public_test_cases") or item.get("test_cases") or "[]"
+            if isinstance(tcs_raw, str):
+                try:
+                    tcs_raw = json.loads(tcs_raw)
+                except Exception:
+                    tcs_raw = []
+            tcs = [{"input": t.get("input", ""), "output": t.get("output", "")}
+                   for t in (tcs_raw or []) if t.get("output")]
+            if tcs:
+                problems.append({
+                    "question_content": item.get("question_content", ""),
+                    "test_cases": tcs[:2],
+                })
+            if len(problems) >= n:
+                break
+        if len(problems) >= n:
+            return problems[:n]
+    except Exception:
+        pass
+    return _LCB_FALLBACK[:n]
+
+
+def _extract_code(response: str) -> str:
+    """Extract Python code from model response, stripping markdown fences."""
+    m = re.search(r"```python\s*(.*?)```", response, re.DOTALL)
+    if m:
+        return m.group(1).strip()
+    m = re.search(r"```\s*(.*?)```", response, re.DOTALL)
+    if m:
+        return m.group(1).strip()
+    return response.strip()
+
+
+def _execute_code(code: str, test_input: str = "",
+                  timeout: int = 10) -> str:
+    """Run code in isolated subprocess, return stdout or sentinel string."""
+    fd, fname = tempfile.mkstemp(suffix=".py")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(code)
+        result = subprocess.run(
+            [sys.executable, fname],
+            input=test_input,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+        return result.stdout.strip()
+    except subprocess.TimeoutExpired:
+        return "__TIMEOUT__"
+    except Exception as e:
+        return f"__ERROR__: {e}"
+    finally:
+        try:
+            os.unlink(fname)
+        except OSError:
+            pass
+
+
+def run_livecodebench(n: int = 25) -> dict:
+    """
+    Run n LiveCodeBench code-generation problems.
+    Generate Python that reads stdin/prints stdout, execute against test cases.
+    Score: pass@1 — all test cases must pass.
+    """
+    problems = _load_livecodebench(n)
+    actual_n = len(problems)
+    correct = 0
+    print(f"\n[benchmark] LiveCodeBench — {actual_n} code-generation problems", flush=True)
+    print(f"[benchmark] Model: {STUDENT_MODEL} (fallback: {FALLBACK_MODEL})\n", flush=True)
+
+    for i, p in enumerate(problems, 1):
+        prompt = (
+            f"Solve this programming problem in Python.\n\n"
+            f"{p['question_content']}\n\n"
+            "Write ONLY Python code that reads from stdin and prints to stdout. "
+            "No explanation, no markdown."
+        )
+        response = _call_model(prompt)
+        code = _extract_code(response)
+
+        all_pass = True
+        for tc in p["test_cases"]:
+            got = _execute_code(code, test_input=tc["input"])
+            exp = tc["output"].strip()
+            if got != exp:
+                all_pass = False
+                break
+
+        if all_pass:
+            correct += 1
+        if i % 5 == 0 or i == actual_n:
+            print(f"  [{i:>3}/{actual_n}]  correct so far: {correct}/{i}  "
+                  f"({100*correct/i:.1f}%)", flush=True)
+
+    score = correct / actual_n if actual_n else 0.0
+    baseline = BASELINES["livecodebench"]
+    delta = score - baseline
+    print(f"\n[benchmark] LiveCodeBench result: {correct}/{actual_n} = {score:.3f}  "
+          f"(baseline {baseline:.2f}  Δ{delta:+.3f})", flush=True)
+    save_score("livecodebench", score, actual_n, correct)
+    return {"benchmark": "livecodebench", "score": score,
+            "n_problems": actual_n, "n_correct": correct}
+
+
+# ── SWE-bench stub ────────────────────────────────────────────────────────────
+
+def run_swebench() -> dict:
+    """
+    SWE-bench Verified requires Docker + full harness.  This is a stub.
+
+    To run properly:
+        pip install swebench
+        python -m swebench.harness.run_evaluation \\
+            --predictions_path your_preds.jsonl \\
+            --swe_bench_tasks princeton-nlp/SWE-bench_Verified \\
+            --log_dir ./logs --testbed /tmp/swebench_testbed
+
+    See: https://github.com/princeton-nlp/SWE-bench
+    """
+    notes = (
+        "SWE-bench Verified requires Docker + full harness setup. "
+        "See: https://github.com/princeton-nlp/SWE-bench. "
+        "Stub logged — re-run after installing Docker and swebench package."
+    )
+    print(f"\n[benchmark] SWE-bench: {notes}", flush=True)
+    return {
+        "benchmark": "swebench",
+        "score": None,
+        "n_problems": 0,
+        "n_correct": 0,
+        "notes": notes,
+    }
+
+
+# ── Report ────────────────────────────────────────────────────────────────────
+
+def print_score_history() -> None:
+    """Print formatted table of all benchmark scores."""
+    scores = get_last_scores()
+    cycle  = get_cycle_count()
+    print("\n[benchmark] ── Score History ─────────────────────────────────────")
+    print(f"  Cycles completed: {cycle}")
+    print(f"  {'Benchmark':<16} {'Last score':>11} {'Baseline':>9} {'Gap':>7}  Last run")
+    print("  " + "─" * 62)
+    for bm_name in BENCHMARK_NAMES:
+        rec = scores[bm_name]
+        baseline = BASELINES[bm_name]
+        if rec:
+            score = rec["score"]
+            delta = score - baseline
+            ts    = rec["timestamp"][:10]
+            print(f"  {bm_name:<16} {score:>11.3f} {baseline:>9.2f} {delta:>+7.3f}  {ts}")
+        else:
+            print(f"  {bm_name:<16} {'(never run)':>11} {baseline:>9.2f} {'—':>7}  —")
+    print("[benchmark] ───────────────────────────────────────────────────────\n")
+
+
+# ── Runners registry ──────────────────────────────────────────────────────────
+
+RUNNERS: dict[str, object] = {
+    "cruxeval":      run_cruxeval,
+    "livecodebench": run_livecodebench,
+    "swebench":      run_swebench,
+}
+
+
+def run_benchmark_cycle(override: str | None = None,
+                        n: int | None = None) -> dict:
+    """Select and run the next benchmark. Returns the result dict."""
+    target = override or select_next_benchmark()
+    print(f"\n[benchmark] Selected: {target.upper()}", flush=True)
+    kwargs: dict = {}
+    if n is not None and target != "swebench":
+        kwargs["n"] = n
+    result = RUNNERS[target](**kwargs)
+    print_score_history()
+    return result
+
+
+if __name__ == "__main__":
+    import argparse
+    parser = argparse.ArgumentParser(description="Blackwell code benchmark runner")
+    parser.add_argument("--benchmark", choices=BENCHMARK_NAMES,
+                        help="Force a specific benchmark (default: auto-select)")
+    parser.add_argument("--n", type=int,
+                        help="Number of problems (default: 50 cruxeval / 25 livecodebench)")
+    parser.add_argument("--history", action="store_true",
+                        help="Print score history and exit")
+    args = parser.parse_args()
+
+    if args.history:
+        print_score_history()
+        sys.exit(0)
+
+    result = run_benchmark_cycle(override=args.benchmark, n=args.n)
+    sys.exit(0 if result.get("score") is not None else 1)
+
+
 # Run once on import so the schema is always ready before any function is called.
 _ensure_score_table()

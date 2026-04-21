@@ -100,3 +100,47 @@ def test_load_cruxeval_caches():
     bm._load_cruxeval(n=3)
     cache_file = os.path.join(bm.CACHE_DIR, "cruxeval.jsonl")
     assert os.path.exists(cache_file)
+
+def test_load_livecodebench_returns_list():
+    problems = bm._load_livecodebench(n=5)
+    assert isinstance(problems, list)
+    assert len(problems) == 5
+    assert "question_content" in problems[0]
+    assert "test_cases" in problems[0]
+
+def test_execute_code_correct():
+    code = "print(int(input()) * 2)"
+    result = bm._execute_code(code, test_input="5\n")
+    assert result == "10"
+
+def test_execute_code_timeout():
+    code = "while True: pass"
+    result = bm._execute_code(code, timeout=1)
+    assert result == "__TIMEOUT__"
+
+def test_extract_code_strips_fences():
+    response = "```python\nprint('hi')\n```"
+    assert bm._extract_code(response) == "print('hi')"
+
+def test_extract_code_bare():
+    response = "print('hi')"
+    assert bm._extract_code(response) == "print('hi')"
+
+def test_swebench_returns_stub():
+    result = bm.run_swebench()
+    assert result["benchmark"] == "swebench"
+    assert result["score"] is None
+    assert "docker" in result["notes"].lower()
+
+def test_print_score_history_runs():
+    import importlib, tempfile
+    os.environ["_BM_DB_OVERRIDE"] = tempfile.mktemp(suffix=".db")
+    importlib.reload(bm)
+    bm.print_score_history()  # should not raise
+
+def test_run_benchmark_cycle_override():
+    import importlib, tempfile
+    os.environ["_BM_DB_OVERRIDE"] = tempfile.mktemp(suffix=".db")
+    importlib.reload(bm)
+    result = bm.run_benchmark_cycle(override="swebench")
+    assert result["benchmark"] == "swebench"
