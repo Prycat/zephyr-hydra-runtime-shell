@@ -232,5 +232,103 @@ def select_next_benchmark() -> str:
     return min(candidates, key=gap)
 
 
+# ── Ollama call ───────────────────────────────────────────────────────────────
+
+def _call_model(prompt: str, model: str = STUDENT_MODEL,
+                system: str = "") -> str:
+    """Call model via Ollama, return response text. Falls back to hermes3:8b."""
+    import httpx
+    messages = []
+    if system:
+        messages.append({"role": "system", "content": system})
+    messages.append({"role": "user", "content": prompt})
+
+    for m in (model, FALLBACK_MODEL):
+        try:
+            resp = httpx.post(
+                _OLLAMA_CHAT_URL,
+                json={"model": m, "messages": messages,
+                      "temperature": 0.0, "max_tokens": 256},
+                timeout=MODEL_TIMEOUT,
+            )
+            if resp.status_code == 200:
+                return resp.json()["choices"][0]["message"]["content"].strip()
+        except Exception:
+            continue
+    return "(model unavailable)"
+
+
+# ── Dataset helpers ───────────────────────────────────────────────────────────
+
+def _fetch_url(url: str, cache_name: str) -> str:
+    """Download URL to local cache dir, return local path. Skips if cached."""
+    os.makedirs(CACHE_DIR, exist_ok=True)
+    local = os.path.join(CACHE_DIR, cache_name)
+    if os.path.exists(local):
+        return local
+    print(f"[benchmark] Downloading {cache_name}...", flush=True)
+    urllib.request.urlretrieve(url, local)
+    print(f"[benchmark] Cached to {local}", flush=True)
+    return local
+
+
+# ── CRUXEval ──────────────────────────────────────────────────────────────────
+
+CRUXEVAL_URL = (
+    "https://raw.githubusercontent.com/facebookresearch/"
+    "CRUXEval/main/data/cruxeval.jsonl"
+)
+
+
+def _load_cruxeval(n: int = 50) -> list[dict]:
+    """Load n CRUXEval output-prediction problems from GitHub cache."""
+    path = _fetch_url(CRUXEVAL_URL, "cruxeval.jsonl")
+    problems = []
+    with open(path, encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if line:
+                problems.append(json.loads(line))
+    return problems[:n]
+
+
+def run_cruxeval(n: int = 50) -> dict:
+    """
+    Run CRUXEval output-prediction on n problems.
+    Prompt: given function + call, predict return value.
+    Score: exact match after stripping whitespace and surrounding quotes.
+    """
+    problems = _load_cruxeval(n)
+    actual_n = len(problems)
+    correct = 0
+    print(f"\n[benchmark] CRUXEval — {actual_n} output-prediction problems", flush=True)
+    print(f"[benchmark] Model: {STUDENT_MODEL} (fallback: {FALLBACK_MODEL})\n", flush=True)
+
+    for i, p in enumerate(problems, 1):
+        prompt = (
+            f"Given this Python function:\n\n{p['code']}\n\n"
+            f"What is the return value of: {p['input']}\n\n"
+            "Reply with ONLY the return value — no explanation, no code."
+        )
+        answer = _call_model(prompt)
+        expected = p["output"].strip()
+        got = answer.strip().strip("'\"")
+        exp = expected.strip().strip("'\"")
+        if got == exp:
+            correct += 1
+        if i % 10 == 0 or i == actual_n:
+            print(f"  [{i:>3}/{actual_n}]  correct so far: {correct}/{i}  "
+                  f"({100*correct/i:.1f}%)", flush=True)
+
+    score = correct / actual_n if actual_n else 0.0
+    baseline = BASELINES["cruxeval"]
+    delta = score - baseline
+    print(f"\n[benchmark] CRUXEval result: {correct}/{actual_n} = {score:.3f}  "
+          f"(baseline {baseline:.2f}  Δ{delta:+.3f})", flush=True)
+    save_score("cruxeval", score, actual_n, correct)
+    return {"benchmark": "cruxeval", "score": score,
+            "n_problems": actual_n, "n_correct": correct}
+
+
 # Run once on import so the schema is always ready before any function is called.
 _ensure_score_table()

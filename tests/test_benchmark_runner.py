@@ -81,3 +81,22 @@ def test_swebench_not_triggered_on_cycle_zero():
     # cycle_count is 0 → swebench should NOT be selected even though never run
     result = bm.select_next_benchmark()
     assert result != "swebench"
+
+def test_call_model_returns_string():
+    result = bm._call_model("What is 2+2?")
+    assert isinstance(result, str)
+    assert len(result) > 0
+
+def test_load_cruxeval_returns_list():
+    problems = bm._load_cruxeval(n=5)
+    assert isinstance(problems, list)
+    assert len(problems) == 5
+    assert "code" in problems[0]
+    assert "input" in problems[0]
+    assert "output" in problems[0]
+
+def test_load_cruxeval_caches():
+    import os
+    bm._load_cruxeval(n=3)
+    cache_file = os.path.join(bm.CACHE_DIR, "cruxeval.jsonl")
+    assert os.path.exists(cache_file)
