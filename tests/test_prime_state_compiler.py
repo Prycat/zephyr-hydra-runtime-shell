@@ -2,7 +2,12 @@
 import numpy as np
 import pytest
 
-from blackwell.prime_state_compiler import build_macro_states, build_transfer_matrix, DB_PATH
+from blackwell.prime_state_compiler import (
+    build_macro_states,
+    build_transfer_matrix,
+    enumerate_prime_orbits,
+    DB_PATH,
+)
 
 
 def _synthetic_data(n: int = 50) -> np.ndarray:
@@ -110,3 +115,47 @@ def test_transfer_matrix_real_db():
     assert L.shape == (5, 5)
     row_sums = L.sum(axis=1)
     assert np.allclose(row_sums, 1.0, atol=1e-8)
+
+
+# ---------------------------------------------------------------------------
+# enumerate_prime_orbits tests
+# ---------------------------------------------------------------------------
+
+
+def test_prime_orbits_self_loops():
+    """All 3 states have self-loops: π(1) should equal 3."""
+    L = np.eye(3) * 0.5 + np.ones((3, 3)) * (0.5 / 3)
+    orbits = enumerate_prime_orbits(L, L_threshold=0.01, max_length=4)
+    assert orbits["pi"][1] == 3  # all 3 states have self-loops
+
+
+def test_prime_orbits_dag_no_cycles():
+    """A strict lower-triangular (DAG) adjacency has no closed walks for n>=1
+    except possibly self-loops.  A purely off-diagonal upper-triangular matrix
+    has no closed walks at all, so π(n)==0 for all n>=1."""
+    # Strictly upper-triangular — no self-loops and no back edges → A^n == 0
+    L = np.array([
+        [0.0, 0.8, 0.0],
+        [0.0, 0.0, 0.9],
+        [0.0, 0.0, 0.0],
+    ])
+    orbits = enumerate_prime_orbits(L, L_threshold=0.01, max_length=5)
+    for n in range(1, 6):
+        assert orbits["pi"][n] == 0, f"Expected π({n})==0 for DAG, got {orbits['pi'][n]}"
+
+
+def test_prime_orbits_pi_has_all_keys():
+    """The returned 'pi' dict must contain every integer key from 1 to max_length."""
+    L = np.eye(4) * 0.6 + np.ones((4, 4)) * 0.1
+    max_length = 6
+    orbits = enumerate_prime_orbits(L, L_threshold=0.01, max_length=max_length)
+    assert set(orbits["pi"].keys()) == set(range(1, max_length + 1))
+
+
+def test_prime_orbits_topological_entropy_is_nonneg_float():
+    """topological_entropy must be a float >= 0."""
+    L = np.eye(3) * 0.5 + np.ones((3, 3)) * (0.5 / 3)
+    orbits = enumerate_prime_orbits(L, L_threshold=0.01, max_length=8)
+    h = orbits["topological_entropy"]
+    assert isinstance(h, float)
+    assert h >= 0.0

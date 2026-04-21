@@ -226,3 +226,66 @@ def build_transfer_matrix(
             print(f"{key}: {val}")
 
     return L, stats
+
+
+def enumerate_prime_orbits(
+    L: np.ndarray,
+    L_threshold: float = 0.01,
+    max_length: int = 8,
+) -> dict:
+    """Count primitive closed orbits on the adjacency graph of L.
+
+    Uses the Möbius-style inversion of the trace formula for directed graphs:
+
+        Tr(A^n) = Σ_{d | n} d · π(d)
+
+    where π(d) is the number of primitive orbits of length d.  Inverting:
+
+        π(n) = (1/n) · (Tr(A^n) - Σ_{d | n, d < n} d · π(d))
+
+    The topological entropy h is the exponential growth rate of orbit counts,
+    estimated via linear regression of log(π(n) · n) on n.
+
+    Parameters
+    ----------
+    L : np.ndarray, shape (k, k)
+        Row-stochastic transfer matrix (or any square matrix).
+    L_threshold : float
+        Entries of L strictly above this threshold are treated as edges
+        (i.e., adjacency weight 1); entries at or below are treated as 0.
+    max_length : int
+        Maximum orbit length to enumerate.
+
+    Returns
+    -------
+    dict with keys:
+        pi                 : dict[int, int] — primitive orbit counts keyed 1..max_length.
+        topological_entropy: float — slope of log(π(n)·n) vs n (≈ growth rate).
+        power_law_r2       : float — R² of the linear fit used to estimate h.
+    """
+    k = L.shape[0]
+    A = (L > L_threshold).astype(int)  # adjacency matrix
+
+    pi: dict[int, int] = {}
+    for n in range(1, max_length + 1):
+        An = np.linalg.matrix_power(A, n)
+        total = int(An.diagonal().sum())
+        # Subtract contributions of shorter primitive orbits via the trace formula.
+        prim_count = total
+        for d in range(1, n):
+            if n % d == 0:
+                prim_count -= d * pi.get(d, 0)
+        pi[n] = max(0, prim_count // n)
+
+    # Topological entropy: π(n) ≈ e^{h·n} / n  ⟹  log(π(n)·n) ≈ h·n
+    ns = np.array(sorted(pi.keys()), dtype=float)
+    counts = np.array([pi[int(n)] for n in ns], dtype=float)
+    valid = counts > 0
+    if valid.sum() > 2:
+        log_counts = np.log(counts[valid] * ns[valid])
+        h = float(np.polyfit(ns[valid], log_counts, 1)[0])
+        r2 = float(np.corrcoef(ns[valid], log_counts)[0, 1] ** 2)
+    else:
+        h, r2 = 0.0, 0.0
+
+    return {"pi": pi, "topological_entropy": h, "power_law_r2": r2}
