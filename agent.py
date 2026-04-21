@@ -386,6 +386,7 @@ CLI_COMMANDS = {
     "/reset_drift":   "Wipe drift baseline — use after auditing judge inflation or after a checkpoint",
     "/repair_axioms": "Restore axioms corrupted by paste artifacts to probes.jsonl defaults",
     "/code_benchmark": "Run next code benchmark (auto-selects weakest) — /code_benchmark [cruxeval|livecodebench|swebench] [--n N] [--history]",
+    "/benchmark_history": "Show full benchmark score history across all training cycles",
     "/exit":        "Exit Zephyr",
 }
 
@@ -726,6 +727,28 @@ def handle_cli(cmd: str, history: list[dict]) -> tuple[bool, list[dict]]:
             print("[axioms] Re-run '/blackwell axioms' to set your ground truth cleanly.\n")
         except Exception as e:
             print(f"[axioms] Repair failed: {e}\n")
+
+    elif command == "/benchmark_history":
+        import shutil as _shutil
+        _py     = _shutil.which("py")
+        run_cmd = ([_py, "-3.11"] if _py else ["python"]) + \
+                  ["blackwell/benchmark_runner.py", "--history"]
+        print()
+        try:
+            proc = subprocess.Popen(
+                run_cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                cwd=os.path.dirname(os.path.abspath(__file__)),
+            )
+            for line in proc.stdout:
+                print(line, end="", flush=True)
+            proc.wait()
+        except Exception as e:
+            print(f"[benchmark] Failed to launch: {e}\n")
 
     elif command == "/code_benchmark":
         import shlex, shutil as _shutil
