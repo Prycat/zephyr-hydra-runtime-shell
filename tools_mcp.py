@@ -11,6 +11,21 @@ import threading
 import time
 from typing import Dict, List, Optional
 
+import re as _re
+
+
+def _sanitize_wing(name: str) -> str:
+    """
+    MemPalace wing names must be alphanumeric + spaces/hyphens/underscores.
+    Strip anything else so the MCP server doesn't silently mangle the name
+    into something empty or invalid (e.g. 'SWE-bench agents (various, 2024–25)'
+    → 'SWEbench agents various 202425' which mempalace rejects).
+    """
+    clean = _re.sub(r"[^a-zA-Z0-9 _-]", " ", name)
+    clean = _re.sub(r"\s+", " ", clean).strip()
+    return clean or "general"
+
+
 # ── Curated tool sets ────────────────────────────────────────────────────────
 # Map: server_key → {mcp_tool_name: hermes_tool_name}
 # All names confirmed from live manifests: MemPalace/Serena (Task 1), Ruflo (Task 3, claude-flow v3.0.0).
@@ -262,7 +277,19 @@ def register_mcp_tools(tools_list: list, handlers: dict) -> None:
             # Capture loop vars for closure
             _srv   = server
             _mname = mcp_name
-            handlers[hermes_name] = lambda args, s=_srv, n=_mname: s.call_tool(n, args)
+            _skey  = server_key
+
+            def _make_handler(s, n, sk):
+                def _handler(args):
+                    # Sanitize wing names for mempalace — special chars cause
+                    # "Invalid characters have been removed" errors that break calls
+                    if sk == "mempalace" and "wing" in args:
+                        args = dict(args)
+                        args["wing"] = _sanitize_wing(args["wing"])
+                    return s.call_tool(n, args)
+                return _handler
+
+            handlers[hermes_name] = _make_handler(_srv, _mname, _skey)
 
     registered = [h for h in handlers if any(
         h in tool_map.values() for tool_map in CURATED.values()

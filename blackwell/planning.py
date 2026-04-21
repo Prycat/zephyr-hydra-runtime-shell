@@ -204,6 +204,16 @@ def run_planning_session(regret_v: dict, target_dims: list[str]) -> list[dict]:
             answer = ""
             for _retry in range(16):   # drain stray \n artifacts in pipe mode
                 answer = input(_prompt).strip()
+                if sys.stdout.isatty():
+                    # TTY: drain Windows console buffer to prevent paste
+                    # artifacts from silently answering subsequent questions
+                    try:
+                        import msvcrt, time as _t
+                        _t.sleep(0.06)
+                        while msvcrt.kbhit():
+                            msvcrt.getwch()
+                    except Exception:
+                        pass
                 if answer or sys.stdout.isatty():
                     break
                 # Pipe mode: empty = pipe flush artifact, not user intent
