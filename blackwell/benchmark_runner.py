@@ -13,6 +13,10 @@ benchmark_cycle  : single-row counter incremented on every save_score() call
 from __future__ import annotations
 import json, os, re, sqlite3, subprocess, sys, tempfile, time, urllib.request
 
+# Windows cp1252 consoles can't print Δ / other Unicode — reconfigure to UTF-8.
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
 _HERE   = os.path.dirname(os.path.abspath(__file__))
 DB_PATH = os.path.join(_HERE, "..", os.environ.get("_BM_DB_OVERRIDE", "blackwell.db"))
 
@@ -578,6 +582,11 @@ def run_benchmark_cycle(override: str | None = None,
     return result
 
 
+# Run once on import so the schema is always ready before any function is called.
+# Must be before __main__ so sys.exit() inside the argparse block doesn't skip it.
+_ensure_score_table()
+
+
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser(description="Blackwell code benchmark runner")
@@ -595,7 +604,3 @@ if __name__ == "__main__":
 
     result = run_benchmark_cycle(override=args.benchmark, n=args.n)
     sys.exit(0 if result.get("score") is not None else 1)
-
-
-# Run once on import so the schema is always ready before any function is called.
-_ensure_score_table()
