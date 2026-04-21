@@ -191,6 +191,12 @@ def build_transfer_matrix(
             if session_ids[idx] == session_ids[idx + 1]:  # same session
                 transitions.append((int(labels_ordered[idx]), int(labels_ordered[idx + 1])))
 
+    # Validate caller-supplied labels before accumulating.
+    if transitions is not None:
+        bad = [(f, t) for f, t in transitions if not (0 <= f < k and 0 <= t < k)]
+        if bad:
+            raise ValueError(f"Transition labels out of range [0, {k}): {bad[:5]}")
+
     # Accumulate transition counts.
     counts = np.zeros((k, k), dtype=float)
     for from_label, to_label in transitions:
@@ -210,7 +216,7 @@ def build_transfer_matrix(
 
     stats = {
         "max_row_sum_error": float(abs(L.sum(axis=1) - 1.0).max()),
-        "irreducible": bool(np.all(np.linalg.matrix_power(L + np.eye(k), k) > 0)),
+        "irreducible": bool(np.all(np.linalg.matrix_power((counts > 0).astype(float) + np.eye(k), k) > 0)),
         "spectral_gap": float(np.real(gap)),
         "top_eigenvalues": [complex(e) for e in evals_sorted[:5]],
     }

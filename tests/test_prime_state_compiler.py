@@ -73,7 +73,7 @@ def test_transfer_matrix_is_row_stochastic():
     transitions = _synthetic_transitions(states, n_transitions=80)
     L, stats = build_transfer_matrix(states, transitions=transitions, verbose=False)
     row_sums = L.sum(axis=1)
-    assert np.allclose(row_sums, 1.0, atol=1e-8) or np.all(row_sums <= 1.0 + 1e-8)
+    assert np.allclose(row_sums, 1.0, atol=1e-8)
     assert L.shape == (5, 5)
 
 
@@ -96,6 +96,12 @@ def test_transfer_matrix_unvisited_rows_are_uniform():
     assert abs(L[2].sum() - 1.0) < 1e-8
 
 
+def test_transfer_matrix_rejects_out_of_range_labels():
+    states = build_macro_states(k=5, data=_synthetic_data(50))
+    with pytest.raises(ValueError, match="out of range"):
+        build_transfer_matrix(states, transitions=[(0, 5), (1, 2)])  # 5 is out of range for k=5
+
+
 @pytest.mark.skipif(not DB_PATH.exists(), reason="blackwell.db not present")
 def test_transfer_matrix_real_db():
     """Smoke test: real DB path; build_transfer_matrix without injected transitions."""
@@ -103,4 +109,4 @@ def test_transfer_matrix_real_db():
     L, stats = build_transfer_matrix(states, verbose=False)
     assert L.shape == (5, 5)
     row_sums = L.sum(axis=1)
-    assert np.allclose(row_sums, 1.0, atol=1e-8) or np.all(row_sums <= 1.0 + 1e-8)
+    assert np.allclose(row_sums, 1.0, atol=1e-8)
