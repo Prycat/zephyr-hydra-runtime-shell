@@ -324,7 +324,7 @@ def trace_correspondence_test(L: np.ndarray, max_n: int = 8) -> dict:
     dict with keys:
         residuals      : dict[int, float] — normalised absolute error ε(n) for
                          each n, defined as
-                         |Tr(L^n) - Σ_{d|n} d·π(d)| / (|Tr(L^n)| + 1e-10).
+                         |Tr(L^n) - Σ_{d|n} d·π(d)| / (max(|Tr(L^n)|, |formula|) + 1e-10).
         mean_residual  : float — arithmetic mean of ε values.
         residual_trend : float — slope of ε(n) vs n (positive → growing error,
                          negative → shrinking, zero if only one data point).
