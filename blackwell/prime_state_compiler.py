@@ -298,6 +298,104 @@ def enumerate_prime_orbits(
     return {"pi": pi, "topological_entropy": h, "power_law_r2": r2}
 
 
+def build_H_err(L: np.ndarray, centroids: np.ndarray) -> np.ndarray:
+    """Construct the self-adjoint error Hamiltonian weighted by per-centroid regret.
+
+    Each centroid is mapped to the 5-dimensional regret space via
+    :func:`blackwell.regret.regret_vector`.  The regret norm acts as a weight:
+    macro-states far from the Target Set S (high regret) contribute large
+    off-diagonal entries, while states already inside S contribute near-zero
+    weight.
+
+    The result is symmetrised as ``(L_err + L_err^T) / 2`` to guarantee
+    self-adjointness.
+
+    Parameters
+    ----------
+    L : np.ndarray, shape (k, k)
+        Row-stochastic transfer matrix.
+    centroids : np.ndarray, shape (k, 5)
+        Cluster centroids in the 5D score space
+        (accuracy, logic, tone, curiosity, safety).
+
+    Returns
+    -------
+    np.ndarray, shape (k, k)
+        Symmetric error Hamiltonian H_err.
+    """
+    from blackwell.regret import regret_vector
+
+    DIMS_KEYS = ["accuracy", "logic", "tone", "curiosity", "safety"]
+
+    def _centroid_regret_norm(centroid: np.ndarray) -> float:
+        # Map raw centroid values to a named dict so regret_vector can use
+        # its dimension keys.  Clip to [0, 1] to stay within valid score range.
+        score_dict = {
+            d: float(np.clip(centroid[i], 0.0, 1.0))
+            for i, d in enumerate(DIMS_KEYS)
+        }
+        rv = regret_vector(score_dict)
+        return float(np.linalg.norm(list(rv.values())))
+
+    w = np.array([_centroid_regret_norm(c) for c in centroids])
+    W = (w[:, None] + w[None, :]) / 2.0
+    L_err = L * W
+    return (L_err + L_err.T) / 2.0
+
+
+def steering_eigenvector_alignment(
+    L: np.ndarray,
+    steering_v: np.ndarray,
+    centroids: np.ndarray,
+) -> dict:
+    """Test spectral alignment of L's non-stationary eigenvectors with the steering direction.
+
+    Takes up to 5 non-stationary eigenvectors of L (skipping the stationary
+    mode λ≈1), projects each onto the 5D score space via *centroids*, and
+    measures cosine similarity with *steering_v* (the direction toward Target
+    Set S).
+
+    Parameters
+    ----------
+    L : np.ndarray, shape (k, k)
+        Row-stochastic transfer matrix.
+    steering_v : np.ndarray, shape (d,)
+        The steering direction in score space (e.g. the vector toward S).
+    centroids : np.ndarray, shape (k, d)
+        Cluster centroids, used to project eigenvector weights into score space.
+
+    Returns
+    -------
+    dict with keys:
+        cosine_alignments : list[float] — |cos θ| between each projected
+                            eigenvector and *steering_v*, length min(5, k-1).
+        max_alignment     : float — maximum value in cosine_alignments,
+                            or 0.0 if the list is empty.
+        random_baseline   : float — 1 / sqrt(d), the expected alignment for a
+                            random direction in d-dimensional space.
+    """
+    evals, evecs = np.linalg.eig(L)
+    order = np.argsort(-np.abs(evals))
+
+    sv_norm = steering_v / (np.linalg.norm(steering_v) + 1e-12)
+    cosines: list[float] = []
+
+    k = L.shape[0]
+    n_modes = min(5, k - 1)  # up to 5 non-stationary modes, skip mode 0 (λ≈1)
+    for idx in order[1 : 1 + n_modes]:
+        ev = np.real(evecs[:, idx])
+        score_direction = centroids.T @ ev  # shape (d,)
+        sd_norm = score_direction / (np.linalg.norm(score_direction) + 1e-12)
+        cosines.append(float(abs(np.dot(sv_norm, sd_norm))))
+
+    random_baseline = 1.0 / np.sqrt(len(steering_v))
+    return {
+        "cosine_alignments": cosines,
+        "max_alignment": max(cosines) if cosines else 0.0,
+        "random_baseline": random_baseline,
+    }
+
+
 def trace_correspondence_test(L: np.ndarray, max_n: int = 8) -> dict:
     """Test whether Tr(L^n) ≈ Σ_{d|n} d · π(d) across orbit lengths.
 

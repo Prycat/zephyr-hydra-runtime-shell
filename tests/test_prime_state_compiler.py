@@ -7,6 +7,8 @@ from blackwell.prime_state_compiler import (
     build_transfer_matrix,
     enumerate_prime_orbits,
     trace_correspondence_test,
+    build_H_err,
+    steering_eigenvector_alignment,
     DB_PATH,
 )
 
@@ -205,3 +207,59 @@ def test_trace_correspondence_trend_is_float():
     L = np.eye(3) * 0.5 + np.ones((3, 3)) * (0.5 / 3)
     result = trace_correspondence_test(L, max_n=4)
     assert isinstance(result["residual_trend"], float)
+
+
+# ---------------------------------------------------------------------------
+# build_H_err tests
+# ---------------------------------------------------------------------------
+
+
+def test_H_err_is_symmetric():
+    """build_H_err must return a symmetric matrix."""
+    rng = np.random.default_rng(42)
+    k = 4
+    # Row-stochastic L via Dirichlet
+    L = rng.dirichlet(np.ones(k), size=k)
+    # Centroids in [0, 1]^5 so regret is well-defined
+    centroids = rng.uniform(0.0, 1.0, size=(k, 5))
+    H = build_H_err(L, centroids)
+    assert H.shape == (k, k), f"Expected shape ({k}, {k}), got {H.shape}"
+    assert np.allclose(H, H.T, atol=1e-10), "H_err is not symmetric"
+
+
+# ---------------------------------------------------------------------------
+# steering_eigenvector_alignment tests
+# ---------------------------------------------------------------------------
+
+
+def test_steering_alignment_returns_scores():
+    rng = np.random.default_rng(42)
+    L = rng.dirichlet(np.ones(4), size=4)
+    steering_v = rng.standard_normal(5)
+    centroids = rng.standard_normal((4, 5))
+    result = steering_eigenvector_alignment(L, steering_v, centroids)
+    assert "cosine_alignments" in result
+    assert all(-1.0 <= c <= 1.0 for c in result["cosine_alignments"])
+
+
+def test_steering_alignment_max_is_max_of_cosines():
+    """max_alignment must equal max(cosine_alignments)."""
+    rng = np.random.default_rng(42)
+    L = rng.dirichlet(np.ones(4), size=4)
+    steering_v = rng.standard_normal(5)
+    centroids = rng.standard_normal((4, 5))
+    result = steering_eigenvector_alignment(L, steering_v, centroids)
+    cosines = result["cosine_alignments"]
+    assert len(cosines) > 0, "cosine_alignments should not be empty for k=4"
+    assert abs(result["max_alignment"] - max(cosines)) < 1e-10
+
+
+def test_steering_alignment_random_baseline():
+    """random_baseline must equal 1/sqrt(d) where d is len(steering_v)."""
+    rng = np.random.default_rng(42)
+    L = rng.dirichlet(np.ones(4), size=4)
+    steering_v = rng.standard_normal(5)
+    centroids = rng.standard_normal((4, 5))
+    result = steering_eigenvector_alignment(L, steering_v, centroids)
+    expected_baseline = 1.0 / np.sqrt(5)
+    assert abs(result["random_baseline"] - expected_baseline) < 1e-10
