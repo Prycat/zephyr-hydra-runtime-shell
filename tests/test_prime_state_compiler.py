@@ -12,8 +12,7 @@ def _synthetic_data(n: int = 50) -> np.ndarray:
 
 
 def test_build_macro_states_returns_k_clusters():
-    data = _synthetic_data(50)
-    result = build_macro_states(k=5, data=data)
+    result = build_macro_states(k=5, data=_synthetic_data(50))
     assert len(result["centroids"]) == 5
     assert result["silhouette"] >= 0.0
     assert "labels" in result
