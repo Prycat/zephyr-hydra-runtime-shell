@@ -443,3 +443,30 @@ def trace_correspondence_test(L: np.ndarray, max_n: int = 8) -> dict:
         "mean_residual": float(np.mean(eps_vals)),
         "residual_trend": trend,
     }
+
+
+if __name__ == "__main__":
+    import sys
+    k = int(sys.argv[1]) if len(sys.argv) > 1 else 20
+    print("=== E1: Macro-state construction ===")
+    states = build_macro_states(k=k, verbose=True)
+    print("\n=== E2: Transfer matrix ===")
+    L, stats = build_transfer_matrix(states, verbose=True)
+    print("\n=== E3: Prime orbits ===")
+    orbits = enumerate_prime_orbits(L, max_length=8)
+    for n, c in sorted(orbits["pi"].items()):
+        print(f"  pi({n}) = {c}")
+    print(f"  h = {orbits['topological_entropy']:.4f}  R^2 = {orbits['power_law_r2']:.4f}")
+    print("\n=== E4+E5: Trace correspondence ===")
+    tc = trace_correspondence_test(L, max_n=8)
+    for n, eps in tc["residuals"].items():
+        print(f"  eps({n}) = {eps:.4f}")
+    print(f"  Mean residual: {tc['mean_residual']:.4f}  Trend: {tc['residual_trend']:.4f}")
+    print("\n=== E6: Steering alignment ===")
+    from blackwell.calculate_projection import weighted_steering_vector
+    from blackwell.regret import average_payoff_vector
+    x_bar = average_payoff_vector()
+    sv = weighted_steering_vector(x_bar)
+    sv_arr = np.array([sv[d] for d in ["accuracy", "logic", "tone", "curiosity", "safety"]])
+    align = steering_eigenvector_alignment(L, sv_arr, states["centroids"])
+    print(f"  Max alignment: {align['max_alignment']:.4f}  (random baseline: {align['random_baseline']:.4f})")
