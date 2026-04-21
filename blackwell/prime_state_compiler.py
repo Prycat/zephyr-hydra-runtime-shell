@@ -296,3 +296,52 @@ def enumerate_prime_orbits(
         h, r2 = 0.0, 0.0
 
     return {"pi": pi, "topological_entropy": h, "power_law_r2": r2}
+
+
+def trace_correspondence_test(L: np.ndarray, max_n: int = 8) -> dict:
+    """Test whether Tr(L^n) ≈ Σ_{d|n} d · π(d) across orbit lengths.
+
+    This is experiment E5 of the Prime-State Compiler.  The left side is the
+    empirical power trace of the (float, row-stochastic) transfer matrix; the
+    right side is reconstructed from the primitive orbit counts produced by
+    :func:`enumerate_prime_orbits` over the binary adjacency graph.
+
+    Because L is a weighted matrix while π(d) counts binary-adjacency orbits,
+    the residuals measure the discrepancy between weighted closed-walk counts
+    and binary orbit structure.  They will not generally be zero but should
+    remain small and bounded when the orbit structure captures the dominant
+    dynamics.
+
+    Parameters
+    ----------
+    L : np.ndarray, shape (k, k)
+        Row-stochastic transfer matrix (float values in [0, 1]).
+    max_n : int
+        Maximum power to test.  Residuals are computed for n = 1 … max_n.
+
+    Returns
+    -------
+    dict with keys:
+        residuals      : dict[int, float] — normalised absolute error ε(n) for
+                         each n, defined as
+                         |Tr(L^n) - Σ_{d|n} d·π(d)| / (|Tr(L^n)| + 1e-10).
+        mean_residual  : float — arithmetic mean of ε values.
+        residual_trend : float — slope of ε(n) vs n (positive → growing error,
+                         negative → shrinking, zero if only one data point).
+    """
+    orbits = enumerate_prime_orbits(L, max_length=max_n)
+    residuals: dict[int, float] = {}
+    for n in range(1, max_n + 1):
+        Ln = np.linalg.matrix_power(L, n)
+        empirical = float(np.trace(Ln))
+        formula = sum(d * orbits["pi"].get(d, 0) for d in range(1, n + 1) if n % d == 0)
+        eps = abs(empirical - formula) / (max(abs(empirical), abs(formula)) + 1e-10)
+        residuals[n] = float(eps)
+    ns = list(residuals.keys())
+    eps_vals = [residuals[n] for n in ns]
+    trend = float(np.polyfit(ns, eps_vals, 1)[0]) if len(ns) > 1 else 0.0
+    return {
+        "residuals": residuals,
+        "mean_residual": float(np.mean(eps_vals)),
+        "residual_trend": trend,
+    }

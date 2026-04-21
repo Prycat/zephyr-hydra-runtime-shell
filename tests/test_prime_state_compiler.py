@@ -6,6 +6,7 @@ from blackwell.prime_state_compiler import (
     build_macro_states,
     build_transfer_matrix,
     enumerate_prime_orbits,
+    trace_correspondence_test,
     DB_PATH,
 )
 
@@ -168,3 +169,39 @@ def test_prime_orbits_two_cycle():
     assert orbits["pi"][1] == 0   # no self-loops
     assert orbits["pi"][2] == 1   # exactly one primitive 2-cycle
     assert orbits["pi"][4] == 0   # 4-cycle is just the 2-cycle repeated → not primitive
+
+
+# ---------------------------------------------------------------------------
+# trace_correspondence_test tests
+# ---------------------------------------------------------------------------
+
+
+def test_trace_correspondence_self_consistent():
+    L = np.diag([0.8, 0.6, 0.7]) + 0.1 * np.ones((3, 3)) / 3
+    L = L / L.sum(axis=1, keepdims=True)
+    result = trace_correspondence_test(L, max_n=4)
+    assert "residuals" in result
+    assert all(0.0 <= v <= 1.0 for v in result["residuals"].values())
+
+
+def test_trace_correspondence_identity_matrix():
+    """For L=I, Tr(L^n)=k always and the adjacency is all self-loops,
+    so π(1)=k and orbit formula also gives k.  ε(n) should be 0 for all n."""
+    k = 4
+    L = np.eye(k)
+    result = trace_correspondence_test(L, max_n=4)
+    for n, eps in result["residuals"].items():
+        assert eps < 1e-6, f"Expected near-zero residual at n={n}, got {eps}"
+
+
+def test_trace_correspondence_returns_all_keys():
+    L = np.eye(3) * 0.5 + np.ones((3, 3)) * (0.5 / 3)
+    result = trace_correspondence_test(L, max_n=4)
+    for key in ("residuals", "mean_residual", "residual_trend"):
+        assert key in result, f"missing key: {key}"
+
+
+def test_trace_correspondence_trend_is_float():
+    L = np.eye(3) * 0.5 + np.ones((3, 3)) * (0.5 / 3)
+    result = trace_correspondence_test(L, max_n=4)
+    assert isinstance(result["residual_trend"], float)
