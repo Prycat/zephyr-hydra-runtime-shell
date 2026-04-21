@@ -191,11 +191,10 @@ def build_transfer_matrix(
             if session_ids[idx] == session_ids[idx + 1]:  # same session
                 transitions.append((int(labels_ordered[idx]), int(labels_ordered[idx + 1])))
 
-    # Validate caller-supplied labels before accumulating.
-    if transitions is not None:
-        bad = [(f, t) for f, t in transitions if not (0 <= f < k and 0 <= t < k)]
-        if bad:
-            raise ValueError(f"Transition labels out of range [0, {k}): {bad[:5]}")
+    # Validate labels before accumulating (transitions is always non-None here).
+    bad = [(f, t) for f, t in transitions if not (0 <= f < k and 0 <= t < k)]
+    if bad:
+        raise ValueError(f"Transition labels out of range [0, {k}): {bad[:5]}")
 
     # Accumulate transition counts.
     counts = np.zeros((k, k), dtype=float)
@@ -264,24 +263,32 @@ def enumerate_prime_orbits(
         power_law_r2       : float — R² of the linear fit used to estimate h.
     """
     k = L.shape[0]
-    A = (L > L_threshold).astype(int)  # adjacency matrix
+    A = (L > L_threshold).astype(np.float64)  # adjacency matrix
 
     pi: dict[int, int] = {}
     for n in range(1, max_length + 1):
         An = np.linalg.matrix_power(A, n)
-        total = int(An.diagonal().sum())
+        total = int(round(An.diagonal().sum()))
         # Subtract contributions of shorter primitive orbits via the trace formula.
         prim_count = total
         for d in range(1, n):
             if n % d == 0:
                 prim_count -= d * pi.get(d, 0)
+        if prim_count > 0 and prim_count % n != 0:
+            import warnings
+            warnings.warn(
+                f"Möbius inversion produced non-integer primitive count at n={n}: "
+                f"prim_count={prim_count}. This may indicate threshold artefacts.",
+                RuntimeWarning,
+                stacklevel=2,
+            )
         pi[n] = max(0, prim_count // n)
 
     # Topological entropy: π(n) ≈ e^{h·n} / n  ⟹  log(π(n)·n) ≈ h·n
     ns = np.array(sorted(pi.keys()), dtype=float)
     counts = np.array([pi[int(n)] for n in ns], dtype=float)
     valid = counts > 0
-    if valid.sum() > 2:
+    if valid.sum() > 1:
         log_counts = np.log(counts[valid] * ns[valid])
         h = float(np.polyfit(ns[valid], log_counts, 1)[0])
         r2 = float(np.corrcoef(ns[valid], log_counts)[0, 1] ** 2)

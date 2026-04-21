@@ -159,3 +159,12 @@ def test_prime_orbits_topological_entropy_is_nonneg_float():
     h = orbits["topological_entropy"]
     assert isinstance(h, float)
     assert h >= 0.0
+
+
+def test_prime_orbits_two_cycle():
+    """2-state system: 0→1→0 only. π(1)=0, π(2)=1 (the single 2-cycle)."""
+    L = np.array([[0.0, 1.0], [1.0, 0.0]])  # pure swap, no self-loops
+    orbits = enumerate_prime_orbits(L, L_threshold=0.5, max_length=4)
+    assert orbits["pi"][1] == 0   # no self-loops
+    assert orbits["pi"][2] == 1   # exactly one primitive 2-cycle
+    assert orbits["pi"][4] == 0   # 4-cycle is just the 2-cycle repeated → not primitive
