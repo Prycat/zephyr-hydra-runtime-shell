@@ -44,3 +44,40 @@ def test_score_history_limit():
     assert len(history) == 3
     # Most recent first
     assert history[0]["score"] >= history[1]["score"]
+
+
+def test_select_cruxeval_when_no_scores():
+    import importlib, tempfile
+    # Fresh isolated DB — no scores
+    os.environ["_BM_DB_OVERRIDE"] = tempfile.mktemp(suffix=".db")
+    importlib.reload(bm)
+    result = bm.select_next_benchmark()
+    assert result == "cruxeval"
+
+def test_select_weakest_benchmark():
+    import importlib, tempfile
+    os.environ["_BM_DB_OVERRIDE"] = tempfile.mktemp(suffix=".db")
+    importlib.reload(bm)
+    bm.save_score("cruxeval", 0.70, 50, 35)       # +0.15 above baseline
+    bm.save_score("livecodebench", 0.30, 25, 8)   # -0.15 below baseline
+    result = bm.select_next_benchmark()
+    assert result == "livecodebench"
+
+def test_swebench_every_third_cycle():
+    import importlib, tempfile
+    os.environ["_BM_DB_OVERRIDE"] = tempfile.mktemp(suffix=".db")
+    importlib.reload(bm)
+    # 3 saves = cycle_count becomes 3, swebench never run → trigger
+    bm.save_score("cruxeval", 0.60, 50, 30)
+    bm.save_score("cruxeval", 0.61, 50, 31)
+    bm.save_score("cruxeval", 0.62, 50, 32)
+    result = bm.select_next_benchmark()
+    assert result == "swebench"
+
+def test_swebench_not_triggered_on_cycle_zero():
+    import importlib, tempfile
+    os.environ["_BM_DB_OVERRIDE"] = tempfile.mktemp(suffix=".db")
+    importlib.reload(bm)
+    # cycle_count is 0 → swebench should NOT be selected even though never run
+    result = bm.select_next_benchmark()
+    assert result != "swebench"

@@ -194,5 +194,43 @@ def get_score_history(benchmark: str, limit: int = 10) -> list[dict]:
         conn.close()
 
 
+# ── Cycle selection ───────────────────────────────────────────────────────────
+
+def select_next_benchmark() -> str:
+    """
+    Pick the next benchmark to run.
+
+    Logic:
+      1. If cycle_count > 0 AND cycle_count % 3 == 0 AND swebench has never run
+         → return "swebench"
+      2. If ALL scores are None (no benchmark ever run) → return "cruxeval"
+      3. Otherwise: find benchmark in ["cruxeval", "livecodebench"] with the
+         lowest gap (gap = last_score - baseline; negative = underperforming).
+         Never-run benchmarks get gap = -1.0 (highest priority).
+         Return the benchmark with the lowest gap.
+    """
+    cycle_count = get_cycle_count()
+    scores = get_last_scores()
+
+    # Rule 1: periodic swebench trigger
+    if cycle_count > 0 and cycle_count % 3 == 0 and scores["swebench"] is None:
+        return "swebench"
+
+    # Rule 2: no benchmark has ever run → start with cruxeval
+    if all(v is None for v in scores.values()):
+        return "cruxeval"
+
+    # Rule 3: pick the weakest among cruxeval and livecodebench
+    candidates = ["cruxeval", "livecodebench"]
+
+    def gap(name: str) -> float:
+        record = scores[name]
+        if record is None:
+            return -1.0  # never run → highest priority
+        return record["score"] - BASELINES[name]
+
+    return min(candidates, key=gap)
+
+
 # Run once on import so the schema is always ready before any function is called.
 _ensure_score_table()
