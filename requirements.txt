@@ -6,3 +6,4 @@ httpx
 requests
 anthropic
 google-generativeai
+scikit-learn
