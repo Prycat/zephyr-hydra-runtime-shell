@@ -385,6 +385,7 @@ CLI_COMMANDS = {
     "/run_lora":    "Run LoRA training + GGUF export → registers prycat in Ollama",
     "/reset_drift":   "Wipe drift baseline — use after auditing judge inflation or after a checkpoint",
     "/repair_axioms": "Restore axioms corrupted by paste artifacts to probes.jsonl defaults",
+    "/code_benchmark": "Run next code benchmark (auto-selects weakest) — /code_benchmark [cruxeval|livecodebench|swebench] [--n N] [--history]",
     "/exit":        "Exit Zephyr",
 }
 
@@ -725,6 +726,55 @@ def handle_cli(cmd: str, history: list[dict]) -> tuple[bool, list[dict]]:
             print("[axioms] Re-run '/blackwell axioms' to set your ground truth cleanly.\n")
         except Exception as e:
             print(f"[axioms] Repair failed: {e}\n")
+
+    elif command == "/code_benchmark":
+        import shlex, shutil as _shutil
+        parts   = shlex.split(arg) if arg.strip() else []
+        bm_arg  = None
+        n_arg   = None
+        history = False
+        i = 0
+        while i < len(parts):
+            if parts[i] in ("cruxeval", "livecodebench", "swebench"):
+                bm_arg = parts[i]
+            elif parts[i] == "--n" and i + 1 < len(parts):
+                try:
+                    n_arg = int(parts[i + 1])
+                    i += 1
+                except ValueError:
+                    pass
+            elif parts[i] == "--history":
+                history = True
+            i += 1
+
+        _py = _shutil.which("py")
+        run_cmd = ([_py, "-3.11"] if _py else ["python"]) + \
+                  ["blackwell/benchmark_runner.py"]
+        if history:
+            run_cmd.append("--history")
+        elif bm_arg:
+            run_cmd += ["--benchmark", bm_arg]
+        if n_arg:
+            run_cmd += ["--n", str(n_arg)]
+
+        print(f"\n[benchmark] Launching: {' '.join(run_cmd[2:])}\n", flush=True)
+        try:
+            proc = subprocess.Popen(
+                run_cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                cwd=os.path.dirname(os.path.abspath(__file__)),
+            )
+            for line in proc.stdout:
+                print(line, end="", flush=True)
+            proc.wait()
+            if proc.returncode != 0:
+                print(f"\n[benchmark] Process exited with code {proc.returncode}\n")
+        except Exception as e:
+            print(f"[benchmark] Failed to launch: {e}\n")
 
     elif command in ("/exit", "/quit"):
         print("Bye!")
