@@ -187,9 +187,23 @@ def save_pruning_event(
     score_after: float | None = None,
     committed: bool = False,
 ) -> None:
-    """Persist one pruning cycle result to blackwell.db."""
-    from datetime import datetime, timezone
-    compression = round(heads_pruned / total_heads, 4)
+    """
+    Persist one pruning cycle result to blackwell.db.
+
+    Parameters
+    ----------
+    heads_pruned  : number of attention heads zeroed in this cycle
+    total_heads   : total heads in the model (e.g. 1024 for Llama-3.1-8B)
+    benchmark     : benchmark name used for validation (must be in BENCHMARK_NAMES)
+    score_before  : benchmark score recorded before pruning
+    score_after   : benchmark score after pruning; None if not yet measured
+    committed     : True if the prune was committed, False if rolled back
+    """
+    if benchmark not in BASELINES:
+        raise ValueError(f"Unknown benchmark: {benchmark!r}. Valid: {BENCHMARK_NAMES}")
+    if total_heads <= 0:
+        raise ValueError(f"total_heads must be positive, got {total_heads}")
+    compression = round(heads_pruned / total_heads, 4)  # fraction of heads removed
     delta = round(score_after - score_before, 4) if score_after is not None else None
     conn = _connect()
     try:
@@ -202,7 +216,7 @@ def save_pruning_event(
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
-                    datetime.now(timezone.utc).isoformat(),
+                    time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
                     heads_pruned,
                     total_heads,
                     compression,

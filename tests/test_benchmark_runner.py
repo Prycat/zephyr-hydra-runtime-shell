@@ -1,5 +1,11 @@
 import sys, os, importlib
+import pytest
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+
+@pytest.fixture
+def tmp_db(tmp_path):
+    """Return a path string for a fresh temporary SQLite database."""
+    return str(tmp_path / "test.db")
 
 def setup_module(module):
     import tempfile
@@ -200,3 +206,51 @@ def test_pruning_event_committed_false():
     )
     history = bm.get_pruning_history()
     assert history[0]["committed"] == 0
+
+
+def test_pruning_event_no_score_after(tmp_db):
+    """score_after=None stores NULL; score_delta is also NULL."""
+    import importlib, os
+    os.environ["_BM_DB_OVERRIDE"] = tmp_db
+    import blackwell.benchmark_runner as bm
+    importlib.reload(bm)
+    bm.save_pruning_event(
+        heads_pruned=16,
+        total_heads=512,
+        benchmark="cruxeval",
+        score_before=0.55,
+        # score_after omitted → defaults to None
+    )
+    row = bm.get_pruning_history()[0]
+    assert row["score_after"] is None
+    assert row["score_delta"] is None
+
+
+def test_pruning_event_unknown_benchmark():
+    """save_pruning_event raises ValueError for unknown benchmark names."""
+    import importlib, os, tempfile, pytest
+    os.environ["_BM_DB_OVERRIDE"] = tempfile.mktemp(suffix=".db")
+    import blackwell.benchmark_runner as bm
+    importlib.reload(bm)
+    with pytest.raises(ValueError, match="Unknown benchmark"):
+        bm.save_pruning_event(
+            heads_pruned=8,
+            total_heads=512,
+            benchmark="nonexistent",
+            score_before=0.50,
+        )
+
+
+def test_pruning_event_zero_total_heads():
+    """save_pruning_event raises ValueError when total_heads <= 0."""
+    import importlib, os, tempfile, pytest
+    os.environ["_BM_DB_OVERRIDE"] = tempfile.mktemp(suffix=".db")
+    import blackwell.benchmark_runner as bm
+    importlib.reload(bm)
+    with pytest.raises(ValueError, match="total_heads must be positive"):
+        bm.save_pruning_event(
+            heads_pruned=0,
+            total_heads=0,
+            benchmark="cruxeval",
+            score_before=0.50,
+        )
