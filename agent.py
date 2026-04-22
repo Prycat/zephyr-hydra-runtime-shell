@@ -387,6 +387,7 @@ CLI_COMMANDS = {
     "/repair_axioms": "Restore axioms corrupted by paste artifacts to probes.jsonl defaults",
     "/code_benchmark": "Run next code benchmark (auto-selects weakest) — /code_benchmark [cruxeval|livecodebench|swebench] [--n N] [--history]",
     "/benchmark_history": "Show full benchmark score history across all training cycles",
+    "/run_rdsp": "Regret-Driven Structural Pruning — prune dead attention heads, validate, heal — /run_rdsp [--prune-fraction 0.05] [--benchmark cruxeval] [--n N] [--tolerance 0.05] [--dry-run]",
     "/exit":        "Exit Zephyr",
 }
 
@@ -798,6 +799,49 @@ def handle_cli(cmd: str, history: list[dict]) -> tuple[bool, list[dict]]:
                 print(f"\n[benchmark] Process exited with code {proc.returncode}\n")
         except Exception as e:
             print(f"[benchmark] Failed to launch: {e}\n")
+
+    elif command == "/run_rdsp":
+        import shlex, shutil as _shutil
+        parts     = shlex.split(arg) if arg.strip() else []
+        rdsp_args = []
+        dry_run   = False
+        i = 0
+        while i < len(parts):
+            if parts[i] == "--dry-run":
+                dry_run = True
+                rdsp_args.append("--dry-run")
+            elif parts[i] in ("--prune-fraction", "--benchmark", "--n-benchmark",
+                              "--n-calibration", "--tolerance") and i + 1 < len(parts):
+                rdsp_args += [parts[i], parts[i + 1]]
+                i += 1
+            elif parts[i] == "--n" and i + 1 < len(parts):
+                rdsp_args += ["--n-benchmark", parts[i + 1]]
+                i += 1
+            i += 1
+
+        _py     = _shutil.which("py")
+        run_cmd = ([_py, "-3.11"] if _py else ["python"]) + \
+                  ["blackwell/rdsp.py"] + rdsp_args
+
+        action = "DRY RUN — scoring heads only" if dry_run else "full prune/validate/heal cycle"
+        print(f"\n[rdsp] Launching {action} ...\n", flush=True)
+        try:
+            proc = subprocess.Popen(
+                run_cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                cwd=os.path.dirname(os.path.abspath(__file__)),
+            )
+            for line in proc.stdout:
+                print(line, end="", flush=True)
+            proc.wait()
+            if proc.returncode not in (0, 1):
+                print(f"\n[rdsp] Process exited with code {proc.returncode}\n")
+        except Exception as e:
+            print(f"[rdsp] Failed to launch: {e}\n")
 
     elif command in ("/exit", "/quit"):
         print("Bye!")

@@ -254,3 +254,14 @@ def test_pruning_event_zero_total_heads():
             benchmark="cruxeval",
             score_before=0.50,
         )
+
+
+def test_run_rdsp_in_cli_commands():
+    """Confirm /run_rdsp is registered in agent.py's CLI_COMMANDS and has a handler."""
+    import os
+    agent_src = os.path.join(os.path.dirname(__file__), "..", "agent.py")
+    with open(agent_src, encoding="utf-8") as f:
+        src = f.read()
+    assert '"/run_rdsp"' in src, "/run_rdsp not in CLI_COMMANDS"
+    assert "rdsp.py" in src or "run_rdsp_cycle" in src, \
+        "/run_rdsp handler not found in agent.py"
