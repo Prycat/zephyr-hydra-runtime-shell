@@ -155,6 +155,88 @@ def get_last_scores() -> dict[str, dict | None]:
     return result
 
 
+def _ensure_pruning_table() -> None:
+    """Create pruning_events table if it does not exist."""
+    conn = _connect()
+    try:
+        with conn:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS pruning_events (
+                    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                    timestamp     TEXT    NOT NULL,
+                    heads_pruned  INTEGER NOT NULL,
+                    total_heads   INTEGER NOT NULL,
+                    compression   REAL    NOT NULL,
+                    benchmark     TEXT    NOT NULL,
+                    score_before  REAL    NOT NULL,
+                    score_after   REAL,
+                    score_delta   REAL,
+                    committed     INTEGER NOT NULL DEFAULT 0
+                )
+            """)
+            conn.commit()
+    finally:
+        conn.close()
+
+
+def save_pruning_event(
+    heads_pruned: int,
+    total_heads: int,
+    benchmark: str,
+    score_before: float,
+    score_after: float | None = None,
+    committed: bool = False,
+) -> None:
+    """Persist one pruning cycle result to blackwell.db."""
+    from datetime import datetime, timezone
+    compression = round(heads_pruned / total_heads, 4)
+    delta = round(score_after - score_before, 4) if score_after is not None else None
+    conn = _connect()
+    try:
+        with conn:
+            conn.execute(
+                """
+                INSERT INTO pruning_events
+                    (timestamp, heads_pruned, total_heads, compression,
+                     benchmark, score_before, score_after, score_delta, committed)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    datetime.now(timezone.utc).isoformat(),
+                    heads_pruned,
+                    total_heads,
+                    compression,
+                    benchmark,
+                    score_before,
+                    score_after,
+                    delta,
+                    int(committed),
+                ),
+            )
+            conn.commit()
+    finally:
+        conn.close()
+
+
+def get_pruning_history(limit: int = 20) -> list[dict]:
+    """Return most-recent pruning events, newest first."""
+    conn = _connect()
+    try:
+        rows = conn.execute(
+            """
+            SELECT id, timestamp, heads_pruned, total_heads, compression,
+                   benchmark, score_before, score_after, score_delta, committed
+            FROM   pruning_events
+            ORDER  BY id DESC
+            LIMIT  ?
+            """,
+            (limit,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        conn.close()
+
+
 def get_cycle_count() -> int:
     """Return the total number of save_score() calls recorded so far."""
     conn = _connect()
@@ -399,7 +481,7 @@ def _load_livecodebench(n: int = 25) -> list[dict]:
     try:
         from datasets import load_dataset
         ds = load_dataset("livecodebench/code_generation_lite",
-                          split="test", trust_remote_code=True)
+                          split="test")
         problems = []
         for item in ds:
             tcs_raw = item.get("public_test_cases") or item.get("test_cases") or "[]"
@@ -585,6 +667,7 @@ def run_benchmark_cycle(override: str | None = None,
 # Run once on import so the schema is always ready before any function is called.
 # Must be before __main__ so sys.exit() inside the argparse block doesn't skip it.
 _ensure_score_table()
+_ensure_pruning_table()
 
 
 if __name__ == "__main__":

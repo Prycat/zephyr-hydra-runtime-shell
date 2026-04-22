@@ -144,3 +144,59 @@ def test_run_benchmark_cycle_override():
     importlib.reload(bm)
     result = bm.run_benchmark_cycle(override="swebench")
     assert result["benchmark"] == "swebench"
+
+
+# ── RDSP pruning_events tests ─────────────────────────────────────────────────
+
+def test_pruning_table_created():
+    """pruning_events table exists after module load."""
+    import importlib, os, tempfile
+    os.environ["_BM_DB_OVERRIDE"] = tempfile.mktemp(suffix=".db")
+    import blackwell.benchmark_runner as bm
+    importlib.reload(bm)
+    conn = bm._connect()
+    rows = conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='pruning_events'"
+    ).fetchall()
+    conn.close()
+    assert len(rows) == 1, "pruning_events table not created"
+
+
+def test_save_and_load_pruning_event():
+    """save_pruning_event() persists a row; get_pruning_history() retrieves it."""
+    import importlib, os, tempfile
+    os.environ["_BM_DB_OVERRIDE"] = tempfile.mktemp(suffix=".db")
+    import blackwell.benchmark_runner as bm
+    importlib.reload(bm)
+    bm.save_pruning_event(
+        heads_pruned=48,
+        total_heads=1024,
+        benchmark="cruxeval",
+        score_before=0.50,
+        score_after=0.49,
+        committed=True,
+    )
+    history = bm.get_pruning_history()
+    assert len(history) == 1
+    row = history[0]
+    assert row["heads_pruned"] == 48
+    assert row["committed"] == 1
+    assert abs(row["score_before"] - 0.50) < 1e-6
+
+
+def test_pruning_event_committed_false():
+    """committed=False round-trips correctly."""
+    import importlib, os, tempfile
+    os.environ["_BM_DB_OVERRIDE"] = tempfile.mktemp(suffix=".db")
+    import blackwell.benchmark_runner as bm
+    importlib.reload(bm)
+    bm.save_pruning_event(
+        heads_pruned=32,
+        total_heads=1024,
+        benchmark="livecodebench",
+        score_before=0.48,
+        score_after=0.35,
+        committed=False,
+    )
+    history = bm.get_pruning_history()
+    assert history[0]["committed"] == 0
