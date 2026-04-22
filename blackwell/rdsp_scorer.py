@@ -44,6 +44,49 @@ def _head_flops(seq_len: int, head_dim: int, hidden_size: int) -> float:
     return 4.0 * seq_len * head_dim * hidden_size
 
 
+# ── Layer accessor (handles HF, PEFT wrapper, mock) ──────────────────────────
+
+def _get_model_layers(model):
+    """
+    Return the list of transformer layers, tolerating three common nesting depths.
+
+    Checked paths (first match wins):
+    1. ``model.layers``               — mock models and some flat architectures
+    2. ``model.model.layers``         — standard HF CausalLM (LlamaForCausalLM)
+    3. ``model.model.model.layers``   — PEFT-wrapped (PeftModelForCausalLM wraps CausalLM
+                                        which wraps LlamaModel)
+
+    Parameters
+    ----------
+    model : any HuggingFace / unsloth / PEFT / mock model
+
+    Returns
+    -------
+    The ``ModuleList`` of transformer layers.
+
+    Raises
+    ------
+    AttributeError if no path resolves.
+    """
+    # Path 1: mock / flat
+    if hasattr(model, "layers") and model.layers is not None:
+        return model.layers
+    # Path 2: standard HF
+    if hasattr(model, "model") and hasattr(model.model, "layers"):
+        return model.model.layers
+    # Path 3: PEFT wrapper (PeftModelForCausalLM → LlamaForCausalLM → LlamaModel)
+    if (
+        hasattr(model, "model")
+        and hasattr(model.model, "model")
+        and hasattr(model.model.model, "layers")
+    ):
+        return model.model.model.layers
+    raise AttributeError(
+        f"Cannot find transformer layers in {type(model).__name__}. "
+        "Expected model.layers, model.model.layers, or model.model.model.layers."
+    )
+
+
 # ── Batch accumulator ─────────────────────────────────────────────────────────
 
 def _accumulate_batch(
@@ -73,8 +116,7 @@ def _accumulate_batch(
     head_dim = hidden // n_heads
     flops    = _head_flops(seq_len, head_dim, hidden)
 
-    # Support both model.layers (mock) and model.model.layers (real HF model)
-    layers = getattr(model, "layers", None) or model.model.layers
+    layers = _get_model_layers(model)
 
     for l in range(n_layers):
         o_proj = layers[l].self_attn.o_proj
@@ -185,6 +227,30 @@ def _load_calibration_texts(n: int = 100) -> list[str]:
     return texts[:n]
 
 
+def _dequantize_weight(linear) -> "torch.Tensor":
+    """
+    Return the weight of a Linear or bitsandbytes Linear4bit as a float32 tensor.
+
+    Parameters
+    ----------
+    linear : torch.nn.Linear or bitsandbytes.nn.Linear4bit
+
+    Returns
+    -------
+    float32 tensor with shape [out_features, in_features].
+    """
+    import torch
+    w = linear.weight
+    # bitsandbytes Params4bit stores weights in a flat quantised buffer
+    if hasattr(w, "quant_state"):
+        try:
+            import bitsandbytes.functional as bnb_func
+            return bnb_func.dequantize_4bit(w.data, w.quant_state).float()
+        except Exception:
+            pass  # fall through to generic path
+    return w.detach().float()
+
+
 def score_heads(
     adapter_path: str | None = None,
     n_calibration: int = 40,
@@ -233,47 +299,61 @@ def score_heads(
         device_map     = {"": 0},
     )
 
-    model.train()
-    for p in model.parameters():
-        p.requires_grad_(True)
+    # Unsloth 2026 Zoo patching replaces LlamaAttention.forward() with a single
+    # fused Triton kernel that accesses o_proj.weight directly — PyTorch module
+    # hooks on o_proj (or its base_layer) never fire.  Activation-based scoring
+    # is therefore unavailable without patching the Triton kernel.
+    #
+    # We use **weight-norm scoring** instead:
+    #     importance(l, h) = ||W_o[:, h*d:(h+1)*d]||_F / head_flops
+    #
+    # This measures the structural capacity of each head to influence the
+    # residual stream.  Heads zeroed in a previous RDSP cycle have norm=0 and
+    # are always the top candidates.  For a fresh model the ordering reflects
+    # the pretrained model's internal structure (heads that ended up with
+    # smaller weight columns after pretraining had less influence).
+    #
+    # n_calibration is accepted but unused in this implementation (kept for
+    # API compatibility so callers need not change).
 
-    texts  = _load_calibration_texts(n_calibration)
+    cfg      = model.config
+    n_layers = cfg.num_hidden_layers
+    n_heads  = cfg.num_attention_heads
+    hidden   = cfg.hidden_size
+    head_dim = hidden // n_heads
+
+    layers = _get_model_layers(model)
+
+    # Reference FLOPs for normalisation — use max_seq_length as a representative
+    # sequence length (actual texts vary; this is a constant divisor so it only
+    # affects the absolute magnitude, not the ranking).
+    flops = _head_flops(max_seq_length, head_dim, hidden)
+
     scores: dict[tuple[int, int], float] = {}
-    n_done = 0
 
-    print(f"[rdsp_scorer] Scoring {len(texts)} calibration batches ...", flush=True)
-    for i, text in enumerate(texts):
-        inputs = tokenizer(
-            text,
-            return_tensors = "pt",
-            truncation     = True,
-            max_length     = max_seq_length,
-            padding        = False,
-        ).to("cuda")
+    print(
+        f"[rdsp_scorer] Scoring {n_layers * n_heads} heads via weight-norm "
+        f"(dequantised o_proj) ...",
+        flush=True,
+    )
 
-        seq_len = inputs["input_ids"].shape[1]
+    with torch.no_grad():
+        for l in range(n_layers):
+            o_proj = layers[l].self_attn.o_proj
+            w = _dequantize_weight(o_proj)   # [hidden, n_heads * head_dim]
 
-        try:
-            outputs = model(**inputs, labels=inputs["input_ids"])
-            outputs.loss.backward()
-            _accumulate_batch(model, scores, seq_len=seq_len)
-            model.zero_grad()
-            n_done += 1
-        except Exception as e:
-            print(f"[rdsp_scorer] batch {i} error: {e}", flush=True)
-            model.zero_grad()
-            continue
+            for h in range(n_heads):
+                start = h * head_dim
+                end   = (h + 1) * head_dim
+                importance = w[:, start:end].norm(p="fro").item()
+                scores[(l, h)] = importance / flops
 
-        if (i + 1) % 10 == 0:
-            print(f"[rdsp_scorer]   {i+1}/{len(texts)} batches done", flush=True)
-
-    if n_done > 1:
-        scores = {k: v / n_done for k, v in scores.items()}
+            if (l + 1) % 8 == 0:
+                print(f"[rdsp_scorer]   {l+1}/{n_layers} layers done", flush=True)
 
     normed = normalize_scores(scores)
     print(
-        f"[rdsp_scorer] Done. {len(normed)} head scores computed "
-        f"({n_done} batches).",
+        f"[rdsp_scorer] Done. {len(normed)} head scores computed.",
         flush=True,
     )
     return normed

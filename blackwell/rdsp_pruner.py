@@ -65,8 +65,8 @@ def apply_head_mask(
     hidden   = cfg.hidden_size
     head_dim = hidden // n_heads
 
-    # Support both model.layers (mock) and model.model.layers (real HF model)
-    layers = getattr(model, "layers", None) or model.model.layers
+    from blackwell.rdsp_scorer import _get_model_layers
+    layers = _get_model_layers(model)
 
     with torch.no_grad():
         for (layer_idx, head_idx) in candidates:
