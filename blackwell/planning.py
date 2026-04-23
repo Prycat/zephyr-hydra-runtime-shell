@@ -14,6 +14,7 @@ This is the interactive RLHF loop. The human IS the reward signal.
 import json
 import os
 import sys
+import time
 import httpx
 import datetime
 
@@ -21,6 +22,29 @@ from config import OLLAMA_CHAT_URL as OLLAMA_URL
 MODEL = "hermes3:8b"
 WORLD_MODEL_PATH = os.path.join(os.path.dirname(__file__), "world_model.json")
 TRAINING_PATH    = os.path.join(os.path.dirname(__file__), "training_pairs.jsonl")
+
+
+def _drain_console_buffer() -> None:
+    """
+    Windows: drain any characters left in the console input buffer after a
+    paste event.  Multi-line pastes fill the buffer; without this, subsequent
+    input() calls silently consume the leftovers instead of blocking for the
+    user.  No-op on non-Windows.
+    """
+    if sys.platform != "win32":
+        return
+    try:
+        import msvcrt
+        time.sleep(0.06)
+        count = 0
+        while msvcrt.kbhit():
+            msvcrt.getwch()
+            count += 1
+        if count:
+            print(f"  [note: {count} buffered char(s) from paste discarded — re-type if needed]",
+                  flush=True)
+    except Exception:
+        pass
 
 
 # ─── World Model ─────────────────────────────────────────────────────────────
@@ -377,6 +401,71 @@ Rules:
         ]
 
 
+def generate_next_coding_question(prior_qa: list) -> str:
+    """
+    Generate one follow-up question based on the answers already given this
+    session.  Called after each answer so each question builds on what the
+    human has already shared rather than being pre-baked before the session.
+    """
+    wm = load_coding_world_model()
+    known_skills = "; ".join(wm["skills"][-3:]) if wm["skills"] else "nothing yet"
+    known_gaps   = "; ".join(wm["gaps"][-3:])   if wm["gaps"]   else "unknown"
+
+    prior_text = ""
+    if prior_qa:
+        prior_text = "\n\nConversation so far:\n" + "\n".join(
+            f"Q: {p['question']}\nA: {p['answer']}" for p in prior_qa
+        )
+
+    prompt = f"""You are Zephyr, a research AI specialising in CS and software engineering.
+You are mid-session in Coding Blackwell — a private mode to understand the human's coding
+knowledge, style, and goals so you can help them write better software.
+
+What you know about their skills so far: {known_skills}
+Known gaps to address: {known_gaps}{prior_text}
+
+Generate exactly ONE next question to ask. Rules:
+- Single sentence only — no preamble, no numbering
+- Build on what the human has already shared (don't repeat covered ground)
+- Focus on: specific tools, architecture opinions, current projects, debugging style,
+  real pain points, what makes good code to them
+- Be concrete — "tabs or spaces" level of specificity is good
+- Do NOT start with "Question:" or a number"""
+
+    try:
+        resp = httpx.post(
+            OLLAMA_URL,
+            json={
+                "model": MODEL,
+                "messages": [{"role": "user", "content": prompt}],
+                "temperature": 0.85,
+                "max_tokens": 120,
+            },
+            timeout=30,
+        )
+        resp.raise_for_status()
+        q = resp.json()["choices"][0]["message"]["content"].strip()
+        import re
+        q = re.sub(r"^\d+\.\s*", "", q).strip()
+        if q and len(q) > 5:
+            return q
+        raise ValueError("empty response")
+    except Exception:
+        fallbacks = [
+            "What's the biggest pain point in your current coding workflow?",
+            "Which part of your stack do you feel least confident about?",
+            "What does a good code review look like to you?",
+            "What's a tool or library you wish existed but doesn't?",
+            "What coding habit do you want to build or break this year?",
+        ]
+        # Pick one not already used as a question
+        used = {p["question"] for p in prior_qa}
+        for f in fallbacks:
+            if f not in used:
+                return f
+        return fallbacks[0]
+
+
 def synthesise_coding_update(qa_pairs: list) -> dict:
     qa_text = "\n".join(
         f"Q: {p['question']}\nA: {p['answer']}" for p in qa_pairs
@@ -432,21 +521,42 @@ def run_coding_planning_session() -> list:
     if wm["sessions"] > 0:
         print(f"  Session #{wm['sessions'] + 1}  |  Skills: {len(wm['skills'])}  |  Patterns: {len(wm['patterns'])}\n")
 
-    print("  Generating coding questions...\n")
-    questions = generate_coding_questions(n=5)
-
+    MAX_QUESTIONS = 5
     qa_pairs = []
+    i = 0
 
-    for i, question in enumerate(questions, 1):
-        print(f"  Zephyr [{i}/{len(questions)}]: {question}")
+    while i < MAX_QUESTIONS:
+        i += 1
+        # In TTY mode use \r so the "Generating…" spinner overwrites itself.
+        # In pipe/GUI mode \r is not interpreted as overwrite, so use \n instead
+        # to avoid the spinner appearing inline with the question in the console.
+        if sys.stdout.isatty():
+            print(f"  Generating question {i}/{MAX_QUESTIONS}...", end="\r", flush=True)
+        else:
+            print(f"  Generating question {i}/{MAX_QUESTIONS}...", flush=True)
+
+        question = generate_next_coding_question(prior_qa=qa_pairs)
+
+        # Clear the spinner line only in TTY mode (pipe mode already newlined above)
+        if sys.stdout.isatty():
+            print(" " * 40, end="\r", flush=True)
+
+        print(f"  Zephyr [{i}/{MAX_QUESTIONS}]: {question}")
         print()
+
         try:
             _prompt = "  You: " if sys.stdout.isatty() else ""
             answer = ""
-            for _retry in range(16):   # drain stray \n artifacts in pipe mode
+            for _retry in range(16):    # drain stray \n pipe-flush artifacts
                 answer = input(_prompt).strip()
+                if sys.stdout.isatty():
+                    # TTY: drain Windows console buffer to stop paste residue
+                    # from silently answering subsequent questions
+                    _drain_console_buffer()
                 if answer or sys.stdout.isatty():
                     break
+                # Pipe/GUI mode: empty string = OS pipe flush artifact,
+                # NOT the user pressing Enter on a blank line.  Retry.
         except (EOFError, KeyboardInterrupt):
             print("\n  Session interrupted.")
             break
@@ -455,12 +565,39 @@ def run_coding_planning_session() -> list:
             break
         if answer.lower() == "skip":
             print("  (skipped)\n")
+            i -= 1   # don't count skipped questions against the max
             continue
         if not answer:
+            # Exhausted retries — still empty. Don't penalise the question
+            # counter; just move on so the session isn't stuck.
             continue
 
         qa_pairs.append({"question": question, "answer": answer})
+
+        # Write pair immediately — don't batch at end
+        training_record = {
+            "conversations": [
+                {"from": "human", "value": question},
+                {"from": "gpt",   "value": answer},
+            ],
+            "source": "blackwell_coding_session",
+            "category": "coding",
+        }
+        with open(CODING_TRAINING_PATH, "a", encoding="utf-8") as f:
+            f.write(json.dumps(training_record) + "\n")
+
+        # Generate wiki page immediately
+        try:
+            from blackwell.wiki import write_wiki_page
+            write_wiki_page(training_record)
+        except Exception as _wiki_err:
+            print(f"  [wiki] {_wiki_err}", flush=True)
+
         print(f"\n  Zephyr: Got it.\n")
+
+    # Final drain: flush any paste residue that outlasted the session so it
+    # doesn't leak into the main chat loop and trigger spurious LLM responses.
+    _drain_console_buffer()
 
     if not qa_pairs:
         print("  No answers recorded. Session ended.\n")
@@ -474,18 +611,6 @@ def run_coding_planning_session() -> list:
     wm["gaps"].extend(update.get("gaps", []))
     wm["sessions"] += 1
     save_coding_world_model(wm)
-
-    # Save as coding-tagged training pairs
-    with open(CODING_TRAINING_PATH, "a", encoding="utf-8") as f:
-        for p in qa_pairs:
-            record = {
-                "conversations": [
-                    {"from": "human", "value": p["question"]},
-                    {"from": "gpt",   "value": p["answer"]},
-                ],
-                "source": "blackwell_coding_session",
-            }
-            f.write(json.dumps(record) + "\n")
 
     print("─" * 55)
     print("  CODING WORLD MODEL UPDATE")
