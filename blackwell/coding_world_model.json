@@ -2,16 +2,35 @@
   "skills": [
     "Python",
     "JavaScript",
-    "Java"
+    "Java",
+    "Rust",
+    "CUDA/C++",
+    "Triton (preferred over raw CUDA for 8B-scale inference)",
+    "MLflow",
+    "Weights & Biases (wandb)",
+    "Loguru",
+    "structlog",
+    "Isolating the data pipeline first in ML projects",
+    "Using logging instead of print for debugging",
+    "Inspecting decoded examples in NLP, not just loss curves"
   ],
   "patterns": [
-    "Prefers using spaces for indentation in code",
-    "Comfortable with a wide variety of programming languages and technologies"
+    "Prefers spaces for indentation",
+    "Prioritizes learning languages with high leverage in specific domains",
+    "Values mapping existing knowledge to new areas",
+    "Enabling torch.autograd.set_detect_anomaly(True) for NaN issues",
+    "Structuring log messages to balance info and noise",
+    "Focusing on data integrity and quality early in pipelines",
+    "Using JSON sidecar files to log experiment details",
+    "Adopts structured logging (structlog) for machine-readable pipeline logs",
+    "Prefers Triton over raw CUDA for ergonomics; reserves raw CUDA for the final 15% on deployment-critical paths"
   ],
   "gaps": [
-    "Wants to improve knowledge of specific domain or application area",
-    "Could potentially work on learning additional tools, frameworks, or languages"
+    "Deepen CUDA/C++ knowledge for model inference optimisation",
+    "Explore extending MLflow/W&B for custom CUDA kernel observability",
+    "Strengthen Python ML/NLP patterns beyond current pipeline work",
+    "Understand quantised weight data layout (bitsandbytes) at the CUDA level"
   ],
-  "updated_at": "2026-04-12T21:54:08.191201",
-  "sessions": 1
+  "updated_at": "2026-04-22T23:39:01.693179",
+  "sessions": 5
 }

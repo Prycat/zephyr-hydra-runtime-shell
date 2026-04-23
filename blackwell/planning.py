@@ -408,8 +408,28 @@ def generate_next_coding_question(prior_qa: list) -> str:
     human has already shared rather than being pre-baked before the session.
     """
     wm = load_coding_world_model()
-    known_skills = "; ".join(wm["skills"][-3:]) if wm["skills"] else "nothing yet"
-    known_gaps   = "; ".join(wm["gaps"][-3:])   if wm["gaps"]   else "unknown"
+
+    # Use the full accumulated context, not just the last 3 entries, so that
+    # earlier sessions aren't invisible to question generation.
+    def _dedup(lst: list) -> list:
+        seen: set = set()
+        out = []
+        for x in lst:
+            k = x.lower().strip()
+            if k not in seen:
+                seen.add(k)
+                out.append(x)
+        return out
+
+    known_skills   = "; ".join(_dedup(wm.get("skills",   []))[-10:]) or "nothing yet"
+    known_patterns = "; ".join(_dedup(wm.get("patterns", []))[-6:])  or "none noted"
+    known_gaps     = "; ".join(_dedup(wm.get("gaps",     []))[-5:])  or "unknown"
+
+    # Already-asked questions this session — avoid repeating topics
+    asked_topics = ""
+    if prior_qa:
+        asked_topics = "\n\nTopics already covered this session (do NOT revisit):\n" + \
+            "\n".join(f"- {p['question']}" for p in prior_qa)
 
     prior_text = ""
     if prior_qa:
@@ -421,11 +441,13 @@ def generate_next_coding_question(prior_qa: list) -> str:
 You are mid-session in Coding Blackwell — a private mode to understand the human's coding
 knowledge, style, and goals so you can help them write better software.
 
-What you know about their skills so far: {known_skills}
-Known gaps to address: {known_gaps}{prior_text}
+What you know about their skills: {known_skills}
+Their coding patterns / opinions: {known_patterns}
+Areas they want to improve: {known_gaps}{asked_topics}{prior_text}
 
 Generate exactly ONE next question to ask. Rules:
 - Single sentence only — no preamble, no numbering
+- Ask about ONE specific topic — do not combine unrelated domains in one question
 - Build on what the human has already shared (don't repeat covered ground)
 - Focus on: specific tools, architecture opinions, current projects, debugging style,
   real pain points, what makes good code to them
@@ -606,9 +628,18 @@ def run_coding_planning_session() -> list:
     print("  Synthesising coding world model update...\n")
     update = synthesise_coding_update(qa_pairs)
 
-    wm["skills"].extend(update.get("skills", []))
-    wm["patterns"].extend(update.get("patterns", []))
-    wm["gaps"].extend(update.get("gaps", []))
+    def _merge(existing: list, new: list, cap: int) -> list:
+        """Append new items that aren't already present (case-insensitive), then cap."""
+        seen = {x.lower().strip() for x in existing}
+        for item in new:
+            if item.lower().strip() not in seen:
+                existing.append(item)
+                seen.add(item.lower().strip())
+        return existing[-cap:]   # keep most recent up to cap
+
+    wm["skills"]   = _merge(wm["skills"],   update.get("skills",   []), cap=20)
+    wm["patterns"] = _merge(wm["patterns"], update.get("patterns", []), cap=12)
+    wm["gaps"]     = _merge(wm["gaps"],     update.get("gaps",     []), cap=8)
     wm["sessions"] += 1
     save_coding_world_model(wm)
 
