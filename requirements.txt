@@ -7,3 +7,5 @@ requests
 anthropic
 google-generativeai
 scikit-learn
+PySide6
+PySide6-WebEngine
