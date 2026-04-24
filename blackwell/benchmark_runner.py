@@ -38,6 +38,10 @@ BASELINES: dict[str, float] = {
 }
 BENCHMARK_NAMES = list(BASELINES.keys())
 
+# Benchmarks included in automatic rotation — swebench requires Docker + harness
+# and is excluded until explicitly requested via --benchmark swebench.
+AUTO_BENCHMARKS = ["cruxeval", "livecodebench"]
+
 
 # ---------------------------------------------------------------------------
 # DB helpers
@@ -296,32 +300,36 @@ def get_score_history(benchmark: str, limit: int = 10) -> list[dict]:
 
 # ── Cycle selection ───────────────────────────────────────────────────────────
 
+def _swebench_available() -> bool:
+    """
+    Return True only if both Docker and the swebench package are present.
+    Used to gate explicit --benchmark swebench runs.
+    """
+    import shutil, importlib.util
+    return (
+        shutil.which("docker") is not None
+        and importlib.util.find_spec("swebench") is not None
+    )
+
+
 def select_next_benchmark() -> str:
     """
-    Pick the next benchmark to run.
+    Pick the next benchmark to run from AUTO_BENCHMARKS.
 
     Logic:
-      1. If cycle_count > 0 AND cycle_count % 3 == 0 AND swebench has never run
-         → return "swebench"
-      2. If ALL scores are None (no benchmark ever run) → return "cruxeval"
-      3. Otherwise: find benchmark in ["cruxeval", "livecodebench"] with the
-         lowest gap (gap = last_score - baseline; negative = underperforming).
-         Never-run benchmarks get gap = -1.0 (highest priority).
-         Return the benchmark with the lowest gap.
+      1. If no benchmark has ever run → return "cruxeval".
+      2. Otherwise: pick the AUTO_BENCHMARK with the lowest gap
+         (gap = last_score − baseline; negative = underperforming).
+         Never-run benchmarks get gap = −1.0 (highest priority).
+
+    SWE-bench is excluded from automatic rotation — it requires Docker and the
+    swebench harness.  Request it explicitly with --benchmark swebench.
     """
-    cycle_count = get_cycle_count()
     scores = get_last_scores()
 
-    # Rule 1: periodic swebench trigger
-    if cycle_count > 0 and cycle_count % 3 == 0 and scores["swebench"] is None:
-        return "swebench"
-
-    # Rule 2: no benchmark has ever run → start with cruxeval
-    if all(v is None for v in scores.values()):
+    # No benchmark has ever run → start with cruxeval
+    if all(scores[name] is None for name in AUTO_BENCHMARKS):
         return "cruxeval"
-
-    # Rule 3: pick the weakest among cruxeval and livecodebench
-    candidates = ["cruxeval", "livecodebench"]
 
     def gap(name: str) -> float:
         record = scores[name]
@@ -329,7 +337,7 @@ def select_next_benchmark() -> str:
             return -1.0  # never run → highest priority
         return record["score"] - BASELINES[name]
 
-    return min(candidates, key=gap)
+    return min(AUTO_BENCHMARKS, key=gap)
 
 
 # ── Ollama call ───────────────────────────────────────────────────────────────
@@ -607,7 +615,7 @@ def run_livecodebench(n: int = 25) -> dict:
 
 def run_swebench() -> dict:
     """
-    SWE-bench Verified requires Docker + full harness.  This is a stub.
+    SWE-bench Verified requires Docker + the swebench harness package.
 
     To run properly:
         pip install swebench
@@ -618,10 +626,26 @@ def run_swebench() -> dict:
 
     See: https://github.com/princeton-nlp/SWE-bench
     """
+    if not _swebench_available():
+        print(
+            "\n[benchmark] SWE-bench skipped — Docker and/or the swebench package "
+            "are not installed.\n"
+            "  Install: pip install swebench  (and ensure Docker is running)\n"
+            "  Docs: https://github.com/princeton-nlp/SWE-bench",
+            flush=True,
+        )
+        return {
+            "benchmark": "swebench",
+            "score": None,
+            "n_problems": 0,
+            "n_correct": 0,
+            "skipped": True,
+        }
+
+    # ── Full harness path (reached only when Docker + swebench are present) ──
     notes = (
-        "SWE-bench Verified requires Docker + full harness setup. "
-        "See: https://github.com/princeton-nlp/SWE-bench. "
-        "Stub logged — re-run after installing Docker and swebench package."
+        "SWE-bench Verified full harness not yet wired — "
+        "call swebench.harness.run_evaluation directly."
     )
     print(f"\n[benchmark] SWE-bench: {notes}", flush=True)
     return {
@@ -643,6 +667,7 @@ def print_score_history() -> None:
     print(f"  Cycles completed: {cycle}")
     print(f"  {'Benchmark':<16} {'Last score':>11} {'Baseline':>9} {'Gap':>7}  Last run")
     print("  " + "─" * 62)
+    swebench_ok = _swebench_available()
     for bm_name in BENCHMARK_NAMES:
         rec = scores[bm_name]
         baseline = BASELINES[bm_name]
@@ -651,6 +676,8 @@ def print_score_history() -> None:
             delta = score - baseline
             ts    = rec["timestamp"][:10]
             print(f"  {bm_name:<16} {score:>11.3f} {baseline:>9.2f} {delta:>+7.3f}  {ts}")
+        elif bm_name == "swebench" and not swebench_ok:
+            print(f"  {bm_name:<16} {'(no Docker)':>11} {baseline:>9.2f} {'—':>7}  —")
         else:
             print(f"  {bm_name:<16} {'(never run)':>11} {baseline:>9.2f} {'—':>7}  —")
     print("[benchmark] ───────────────────────────────────────────────────────\n")
@@ -700,4 +727,7 @@ if __name__ == "__main__":
         sys.exit(0)
 
     result = run_benchmark_cycle(override=args.benchmark, n=args.n)
-    sys.exit(0 if result.get("score") is not None else 1)
+    # Exit 1 only when a real run produced no score (actual failure).
+    # Skipped stubs (swebench without Docker) are not failures.
+    failed = result.get("score") is None and not result.get("skipped", False)
+    sys.exit(1 if failed else 0)
