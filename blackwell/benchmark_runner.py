@@ -26,7 +26,7 @@ try:
 except ImportError:
     _OLLAMA_CHAT_URL = "http://localhost:11434/v1/chat/completions"
 
-STUDENT_MODEL  = "prycat:latest"
+STUDENT_MODEL  = "prycat1:8B"
 FALLBACK_MODEL = "hermes3:8b"
 MODEL_TIMEOUT  = 45
 CACHE_DIR = os.path.join(_HERE, "benchmark_cache")

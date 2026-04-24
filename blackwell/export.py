@@ -6,7 +6,7 @@ Pipeline:
   GGUF directory (from lora_steer.py save_pretrained_gguf)
     → find .gguf file
     → write Ollama Modelfile
-    → run: ollama create prycat -f Modelfile
+    → run: ollama create prycat1:8B -f Modelfile
     → print progress lines for the GUI console
 """
 import os
@@ -14,7 +14,7 @@ import glob
 import json
 import subprocess
 
-MODEL_NAME = "prycat"
+MODEL_NAME = "prycat1:8B"
 _HERE = os.path.dirname(os.path.abspath(__file__))
 MODELFILE_PATH = os.path.join(_HERE, "Modelfile")
 _REGISTERED_PATH = os.path.join(_HERE, "adapters", "registered.json")
@@ -38,7 +38,7 @@ def _record_registered(model_name: str):
 def register_with_ollama(gguf_dir: str) -> bool:
     """
     Given a directory containing a .gguf file, write a Modelfile
-    and run `ollama create prycat`.
+    and run `ollama create prycat1:8B`.
     Returns True on success, False on any failure.
     Prints progress lines to stdout for the GUI console.
     """

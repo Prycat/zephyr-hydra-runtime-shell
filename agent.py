@@ -378,11 +378,12 @@ CLI_COMMANDS = {
     "/blackwell": "Enter Zephyr's planning space — he asks, you answer, he grows",
     "/blackwell axioms": "Set your ground truth — 20-question human-steered axiom interview",
     "/coding-blackwell": "CS-focused planning session — sharpens Zephyr's coding instincts",
+    "/wiki":  "Pair wiki — /wiki | /wiki search <query> | /wiki category <name> | /wiki rebuild",
     "/keys":      "Manage API keys — /keys setup | list | clear <provider>",
     "/call":      "Consult an external AI — /call [claude|gpt|grok|gemini] <message>",
     "/trajectory": "Show trajectory pair counts and current regret vector",
     "/feedback":   "Mark last response good/bad — /feedback <session_id> <turn> up|down",
-    "/run_lora":    "Run LoRA training + GGUF export → registers prycat in Ollama",
+    "/run_lora":    "Run LoRA training + GGUF export → registers prycat1:8B in Ollama",
     "/reset_drift":   "Wipe drift baseline — use after auditing judge inflation or after a checkpoint",
     "/repair_axioms": "Restore axioms corrupted by paste artifacts to probes.jsonl defaults",
     "/code_benchmark": "Run next code benchmark (auto-selects weakest) — /code_benchmark [cruxeval|livecodebench|swebench] [--n N] [--history]",
@@ -705,7 +706,7 @@ def handle_cli(cmd: str, history: list[dict]) -> tuple[bool, list[dict]]:
                     text=True,
                 )
                 if result.returncode == 0:
-                    print("\n[BlackLoRA] Training complete. Run /model to switch to prycat.\n")
+                    print("\n[BlackLoRA] Training complete. Run /model to switch to prycat1:8B.\n")
                 else:
                     print(f"\n[BlackLoRA] Training exited with code {result.returncode}.\n")
             except Exception as e:
@@ -842,6 +843,77 @@ def handle_cli(cmd: str, history: list[dict]) -> tuple[bool, list[dict]]:
                 print(f"\n[rdsp] Process exited with code {proc.returncode}\n")
         except Exception as e:
             print(f"[rdsp] Failed to launch: {e}\n")
+
+    elif command == "/wiki":
+        try:
+            from blackwell.wiki import (
+                search_wiki, rebuild_index, generate_all_wiki_pages,
+                _load_search_index, WIKI_ROOT, KNOWN_CATEGORIES,
+            )
+        except ImportError as e:
+            print(f"[wiki] Module unavailable: {e}\n")
+            return True, history
+
+        sub = arg.split(None, 1)
+        subcmd = sub[0].lower() if sub else ""
+
+        if subcmd == "search":
+            query = sub[1].strip() if len(sub) > 1 else ""
+            if not query:
+                print("[wiki] Usage: /wiki search <query>\n")
+            else:
+                results = search_wiki(query)
+                if not results:
+                    print(f"[wiki] No pairs matching '{query}'.\n")
+                else:
+                    print(f"\n  Search: '{query}'  —  {len(results)} result(s)\n")
+                    for r in results[:20]:
+                        print(f"  [{r['category']}]  {r['title']}")
+                        print(f"           {r.get('question_preview', '')[:80]}")
+                        print(f"           wiki/{r['path']}")
+                        print()
+
+        elif subcmd == "category":
+            cat = sub[1].strip().lower() if len(sub) > 1 else ""
+            if not cat:
+                print("[wiki] Usage: /wiki category <name>\n")
+            else:
+                results = search_wiki(cat)
+                cat_results = [r for r in results if r.get("category") == cat]
+                if not cat_results:
+                    print(f"[wiki] No pairs in category '{cat}'.\n")
+                else:
+                    print(f"\n  Category: {cat}  —  {len(cat_results)} pair(s)\n")
+                    for r in cat_results:
+                        print(f"  {r['title']}")
+                        print(f"    {r.get('question_preview', '')[:80]}")
+                    print()
+
+        elif subcmd.startswith("reb"):
+            print("[wiki] Rebuilding from all JSONL pair files...\n")
+            n = generate_all_wiki_pages()
+            print(f"[wiki] {n} pages written. Index rebuilt.\n")
+
+        else:
+            # Default: show overview by category
+            idx = _load_search_index(WIKI_ROOT)
+            pairs = idx.get("pairs", [])
+            if not pairs:
+                print("[wiki] No pages yet. Run /wiki rebuild to generate from existing pairs.\n")
+            else:
+                from collections import Counter
+                counts = Counter(p.get("category", "general") for p in pairs)
+                total = len(pairs)
+                print(f"\n  PAIR WIKI  —  {total} pairs\n")
+                for cat in KNOWN_CATEGORIES:
+                    n = counts.get(cat, 0)
+                    if n:
+                        print(f"  {cat:<16} {n:>4} pairs")
+                print()
+                print("  /wiki search <query>       keyword search")
+                print("  /wiki category <name>      list a category")
+                print("  /wiki rebuild              regenerate from JSONL files")
+                print(f"\n  Wiki root: {WIKI_ROOT}\n")
 
     elif command in ("/exit", "/quit"):
         print("Bye!")

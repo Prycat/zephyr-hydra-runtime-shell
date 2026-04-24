@@ -11,7 +11,7 @@ What it does:
     2. Merges the LoRA adapter at blackwell/adapters/latest
     3. Tries to export as Q4_K_M GGUF
     4. Falls back to f16 GGUF if the quantisation lookup fails
-    5. Runs `ollama create prycat` so the model is immediately usable
+    5. Runs `ollama create prycat1:8B` so the model is immediately usable
 
 The adapter must already exist (training must have completed).
 Re-running this after a failed /run_lora export is safe — it does NOT retrain.
@@ -140,7 +140,7 @@ def _register(output_dir: str):
     import glob
     import subprocess
 
-    MODEL_NAME = "prycat"
+    MODEL_NAME = "prycat1:8B"
 
     # Check whether we have a proper GGUF file or just merged weights
     gguf_files = glob.glob(os.path.join(output_dir, "*.gguf"))
@@ -247,12 +247,12 @@ if __name__ == "__main__":
         ok = _register(output_dir)
         print()
         if ok:
-            print("[export_gguf] Done. Switch to 'prycat' in the model card.")
+            print("[export_gguf] Done. Switch to 'prycat1:8B' in the model card.")
         else:
             print("[export_gguf] Weights saved but Ollama registration failed.")
             print(f"  Merged model: {output_dir}")
             print(f"  Modelfile:    {MODELFILE_PATH}")
-            print("  Run manually:  ollama create prycat -f blackwell\\Modelfile")
+            print("  Run manually:  ollama create prycat1:8B -f blackwell\\Modelfile")
     else:
         print()
         print("[export_gguf] Export failed. Your adapter is safe at:")

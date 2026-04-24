@@ -41,7 +41,7 @@ AXIOM_PAIRS_PATH  = os.path.join(os.path.dirname(__file__), "axiom_pairs.jsonl")
 HUMAN_AXIOMS_PATH = os.path.join(os.path.dirname(__file__), "human_axioms.jsonl")
 
 from config import OLLAMA_CHAT_URL as OLLAMA_URL
-STUDENT_MODEL = "prycat:latest"
+STUDENT_MODEL = "prycat1:8B"
 FALLBACK_MODEL = "hermes3:8b"
 MODEL_TIMEOUT  = 30
 
@@ -353,6 +353,21 @@ def run_axiom_interview() -> list[dict]:
             _append_trinary(result)
             if not result["human_confirmed"]:
                 changed_count += 1
+            # Write wiki page immediately after each probe is answered
+            try:
+                from blackwell.wiki import write_wiki_page
+                write_wiki_page({
+                    "probe_id":    result["probe_id"],
+                    "category":    result["category"],
+                    "source":      "axiom",
+                    "immutable":   probe.get("immutable", False),
+                    "conversations": [
+                        {"from": "human", "value": result["question"]},
+                        {"from": "gpt",   "value": result["human_answer"]},
+                    ],
+                })
+            except Exception as _wiki_err:
+                print(f"  [wiki] {_wiki_err}", flush=True)
         except KeyboardInterrupt:
             print("\n\n  Interview interrupted. Saving progress so far...")
             break

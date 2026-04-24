@@ -443,14 +443,14 @@ def _check_regression(pre: dict, post: dict, target_dims: list[str]) -> None:
 # ── Main training loop ────────────────────────────────────────────────────────
 
 def _prycat_exists() -> bool:
-    """Return True if prycat:latest is registered in Ollama."""
+    """Return True if prycat1:8B is registered in Ollama."""
     try:
         import urllib.request, json as _j
         from config import OLLAMA_TAGS_URL
         with urllib.request.urlopen(OLLAMA_TAGS_URL, timeout=3) as r:
             data = _j.loads(r.read())
         names = [m["name"] for m in data.get("models", [])]
-        return any("prycat" in n for n in names)
+        return any("prycat1" in n for n in names)
     except Exception:
         return False
 
@@ -461,7 +461,7 @@ def _run_probe_gate() -> bool:
     Run the fixed probe suite against the current student model.
     Returns True if training should proceed, False if it should be aborted.
 
-    Skipped on the first training run (prycat:latest not yet in Ollama) —
+    Skipped on the first training run (prycat1:8B not yet in Ollama) —
     the gate detects drift in a trained model; it has nothing to measure
     before the first checkpoint exists.
 
@@ -472,7 +472,7 @@ def _run_probe_gate() -> bool:
     print("\n[BlackLoRA] ── Probe Gate (Fix C) ──────────────────────────────")
 
     if not _prycat_exists():
-        print("[BlackLoRA] prycat:latest not found in Ollama — "
+        print("[BlackLoRA] prycat1:8B not found in Ollama — "
               "skipping probe gate (first training run).", flush=True)
         return True
 

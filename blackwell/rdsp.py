@@ -21,6 +21,8 @@ if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 _HERE         = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.dirname(_HERE))   # ensure project root on path when run as script
+
 ADAPTER_PATH  = os.path.join(_HERE, "adapters", "latest")
 ADAPTER_BKUP  = os.path.join(_HERE, "adapters", "latest_pre_prune")
 MASK_PATH     = os.path.join(ADAPTER_PATH, "prune_mask.json")
@@ -118,7 +120,7 @@ def _unload_ollama_and_free_vram() -> None:
         print(f"[rdsp] VRAM prep warning: {e}", flush=True)
 
 
-def _reload_ollama(model: str = "prycat:latest") -> bool:
+def _reload_ollama(model: str = "prycat1:8B") -> bool:
     """Ping Ollama to load the model back after GGUF re-export."""
     try:
         import httpx

@@ -67,8 +67,8 @@ REPORT_PATH      = os.path.join(os.path.dirname(__file__), "probe_report.json")
 
 from config import OLLAMA_CHAT_URL as OLLAMA_URL
 from blackwell.config_loader import load_thinking_config
-STUDENT_MODEL     = "prycat:latest"
-STUDENT_FALLBACK  = "hermes3:8b"        # used if prycat doesn't exist yet
+STUDENT_MODEL     = "prycat1:8B"
+STUDENT_FALLBACK  = "hermes3:8b"        # used if prycat1:8B doesn't exist yet
 
 STUDENT_TIMEOUT   = 45                  # seconds per probe call
 # Abort thresholds loaded from blackwell/thinking_config.yaml at call time.

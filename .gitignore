@@ -20,10 +20,27 @@ blackwell/training_pairs.jsonl
 blackwell/probe_report.json
 trajectory_samples.jsonl
 mempalace_db/
+failed_trajectories.jsonl
+
+# Personal / session data — users build their own
+blackwell/coding_training_pairs.jsonl
+blackwell/axiom_pairs.jsonl
+blackwell/world_model.json
+blackwell/coding_world_model.json
+blackwell/wiki/
+blackwell/benchmark_cache/
+blackwell/drift_state.json
+blackwell/probe_baseline.json
+blackwell/steering_state.json
+blackwell/adapters/registered.json
+blackwell/blackwell_config.json
 
 # Config — contains API keys / tokens
 .zephyr/
 blackwell/human_axioms.jsonl
+
+# Claude internal
+.claude/
 
 # Ollama Modelfile — generated at export time
 blackwell/Modelfile

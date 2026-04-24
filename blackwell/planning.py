@@ -566,22 +566,16 @@ def run_coding_planning_session() -> list:
         print(f"  Zephyr [{i}/{MAX_QUESTIONS}]: {question}")
         print()
 
-        try:
-            _prompt = "  You: " if sys.stdout.isatty() else ""
-            answer = ""
-            for _retry in range(16):    # drain stray \n pipe-flush artifacts
-                answer = input(_prompt).strip()
-                if sys.stdout.isatty():
-                    # TTY: drain Windows console buffer to stop paste residue
-                    # from silently answering subsequent questions
-                    _drain_console_buffer()
-                if answer or sys.stdout.isatty():
-                    break
-                # Pipe/GUI mode: empty string = OS pipe flush artifact,
-                # NOT the user pressing Enter on a blank line.  Retry.
-        except (EOFError, KeyboardInterrupt):
-            print("\n  Session interrupted.")
-            break
+        # Block until the user provides a real answer — one question at a time.
+        answer = ""
+        while not answer:
+            try:
+                answer = input("  You: ").strip()
+                _drain_console_buffer()
+            except (EOFError, KeyboardInterrupt):
+                print("\n  Session interrupted.")
+                answer = "done"
+                break
 
         if answer.lower() == "done":
             break
@@ -589,12 +583,16 @@ def run_coding_planning_session() -> list:
             print("  (skipped)\n")
             i -= 1   # don't count skipped questions against the max
             continue
-        if not answer:
-            # Exhausted retries — still empty. Don't penalise the question
-            # counter; just move on so the session isn't stuck.
-            continue
 
         qa_pairs.append({"question": question, "answer": answer})
+
+        # Score signal quality before writing
+        try:
+            from blackwell.answer_scorer import score_answer
+            sig = score_answer(question, answer)
+        except Exception:
+            sig = {"score": 0.5, "low_signal": False,
+                   "reason": "scorer unavailable", "incoherent_question": False}
 
         # Write pair immediately — don't batch at end
         training_record = {
@@ -602,16 +600,25 @@ def run_coding_planning_session() -> list:
                 {"from": "human", "value": question},
                 {"from": "gpt",   "value": answer},
             ],
-            "source": "blackwell_coding_session",
-            "category": "coding",
+            "source":       "blackwell_coding_session",
+            "category":     "coding",
+            "answer_score": sig["score"],
+            "low_signal":   sig["low_signal"],
         }
         with open(CODING_TRAINING_PATH, "a", encoding="utf-8") as f:
             f.write(json.dumps(training_record) + "\n")
 
+        # Warn inline if answer is low-signal or question was incoherent
+        if sig["incoherent_question"]:
+            print(f"  [signal] Question may be incoherent — {sig['reason']}", flush=True)
+        elif sig["low_signal"]:
+            print(f"  [signal] Low signal ({sig['score']:.2f}) — {sig['reason']}", flush=True)
+
         # Generate wiki page immediately
         try:
             from blackwell.wiki import write_wiki_page
-            write_wiki_page(training_record)
+            write_wiki_page({**training_record, "answer_score": sig["score"],
+                             "low_signal": sig["low_signal"]})
         except Exception as _wiki_err:
             print(f"  [wiki] {_wiki_err}", flush=True)
 
