@@ -15,6 +15,8 @@ from __future__ import annotations
 import re
 import sys
 
+__all__ = ["is_webengine_available", "extract_last_html_block"]
+
 
 # ── Availability check ────────────────────────────────────────────────────────
 
@@ -29,7 +31,7 @@ def is_webengine_available() -> bool:
 
 # ── HTML extractor ────────────────────────────────────────────────────────────
 
-_HTML_BLOCK_RE = re.compile(r'```html\s*\n(.*?)```', re.DOTALL)
+_HTML_BLOCK_RE = re.compile(r'```html\s*\n(.*?)^```', re.DOTALL | re.MULTILINE)
 
 
 def extract_last_html_block(text: str) -> str | None:
@@ -38,7 +40,11 @@ def extract_last_html_block(text: str) -> str | None:
 
     Returns the inner HTML string (stripped), or None if no complete block
     is present.
+
+    The closing fence must appear at the start of a line.
+    CRLF line endings are normalised to LF before matching.
     """
+    text = text.replace('\r\n', '\n')
     matches = _HTML_BLOCK_RE.findall(text)
     if not matches:
         return None

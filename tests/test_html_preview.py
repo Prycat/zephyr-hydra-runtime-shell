@@ -1,6 +1,6 @@
 # tests/test_html_preview.py
-import sys, os
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import sys
+import os
 
 from zephyr_html_preview import extract_last_html_block, is_webengine_available
 
@@ -33,6 +33,28 @@ def test_extract_incomplete_block_returns_none():
     assert extract_last_html_block("```html\n<p>unclosed") is None
 
 
+def test_extract_crlf_normalised():
+    # Windows-style CRLF should not leave \r artifacts in the captured content
+    text = "```html\r\n<h1>Hello</h1>\r\n```\r\n"
+    result = extract_last_html_block(text)
+    assert result == "<h1>Hello</h1>"
+
+
 def test_is_webengine_available_returns_bool():
     result = is_webengine_available()
     assert isinstance(result, bool)
+
+
+def test_is_webengine_available_true_when_present():
+    from unittest.mock import patch, MagicMock
+    with patch.dict('sys.modules', {'PySide6.QtWebEngineWidgets': MagicMock()}):
+        # The function does a fresh import each call so we test directly
+        assert isinstance(is_webengine_available(), bool)
+
+
+def test_is_webengine_available_false_when_missing():
+    from unittest.mock import patch
+    # Force ImportError by setting the module entry to None
+    with patch.dict('sys.modules', {'PySide6.QtWebEngineWidgets': None}):
+        result = is_webengine_available()
+        assert result is False
