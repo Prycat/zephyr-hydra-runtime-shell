@@ -36,6 +36,9 @@ from PySide6.QtWidgets import (
     QCheckBox, QSlider,
 )
 
+# HTML preview pane
+from zephyr_html_preview import HtmlPreviewPane, extract_last_html_block
+
 _CONFIG_DEFAULTS = {
     "active_model": "hermes3:8b",
     "oracle_model": "hermes3:8b",
@@ -3658,7 +3661,26 @@ class MainWindow(QMainWindow):
         left_layout.setSpacing(0)
 
         self._console = ConsoleWidget()
-        left_layout.addWidget(self._console)
+
+        # Sub-splitter: console (left) | HTML preview (right)
+        # Preview starts at width=0 so it is invisible until triggered.
+        self._console_splitter = QSplitter(Qt.Orientation.Horizontal)
+        self._console_splitter.setHandleWidth(2)
+        self._console_splitter.setStyleSheet(
+            "QSplitter::handle { background: rgba(255,255,255,0.06); }"
+        )
+        self._console_splitter.addWidget(self._console)
+
+        self._preview = HtmlPreviewPane()
+        self._preview.close_requested.connect(self._close_preview)
+        self._console_splitter.addWidget(self._preview)
+
+        # Hide preview pane initially
+        self._console_splitter.setSizes([1, 0])
+        self._console_splitter.setCollapsible(0, False)  # console always visible
+        self._console_splitter.setCollapsible(1, True)   # preview can collapse
+
+        left_layout.addWidget(self._console_splitter)
 
         # Telemetry bar — shown while Zephyr is generating
         self._thinking_bar = ThinkingBar()
@@ -3822,6 +3844,7 @@ class MainWindow(QMainWindow):
         bar.raise_()
         # Auto-hide after 8s if no vote
         bar._auto_hide_timer.start(8000)
+        self._try_show_preview()
 
     def _on_feedback(self, positive: bool):
         """Forward thumbs vote to agent via /feedback command."""
@@ -3829,6 +3852,26 @@ class MainWindow(QMainWindow):
         self._process.send_input(
             f"/feedback {self._current_session_id} {self._current_turn} {vote}"
         )
+
+    def _try_show_preview(self) -> None:
+        """
+        Scan the console text for the last complete ```html block.
+        If found: render it in the preview pane and expand the sub-splitter to 50/50.
+        If not found: leave the preview collapsed.
+        """
+        html = extract_last_html_block(self._console.toPlainText())
+        if not html:
+            return
+        self._preview.render(html)
+        total = self._console_splitter.width()
+        half = max(total // 2, 400)
+        self._console_splitter.setSizes([total - half, half])
+
+    def _close_preview(self) -> None:
+        """Collapse the preview pane back to width=0 and clear it."""
+        total = self._console_splitter.width()
+        self._console_splitter.setSizes([total, 0])
+        self._preview.clear()
 
     def _show_model_card(self):
         """Position and show ModelSwitcherCard above ThinkingBar cell 0."""
