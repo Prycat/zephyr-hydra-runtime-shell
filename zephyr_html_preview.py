@@ -15,7 +15,7 @@ from __future__ import annotations
 import re
 import sys
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, QUrl, Signal
 from PySide6.QtGui import QColor, QFont
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QSizePolicy,
@@ -155,6 +155,9 @@ class HtmlPreviewPane(QWidget):
                 QWebEngineSettings.WebAttribute.JavascriptCanOpenWindows,
                 False,
             )
+            # NOTE: JavascriptEnabled is intentionally left ON — canvas animations
+            # (the primary use case) require JS.  The other three settings provide
+            # meaningful isolation without breaking animation support.
 
             self._view.setSizePolicy(
                 QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
@@ -173,6 +176,8 @@ class HtmlPreviewPane(QWidget):
             )
             root.addWidget(fallback)
             self._has_webengine = False
+            self._reload_btn.setEnabled(False)
+            self._reload_btn.setToolTip("WebEngine not available")
 
         self._current_html: str = ""
 
@@ -182,16 +187,17 @@ class HtmlPreviewPane(QWidget):
         """Render *html* in the preview. No-op if WebEngine is not available."""
         self._current_html = html
         if self._has_webengine:
-            self._view.setHtml(html)
+            self._view.setHtml(html, QUrl("about:blank"))
 
     def clear(self) -> None:
         """Clear the preview to a blank page."""
         self._current_html = ""
         if self._has_webengine:
-            self._view.setHtml("")
+            self._view.setHtml("<html><body></body></html>", QUrl("about:blank"))
 
     # ── Internal ──────────────────────────────────────────────
 
     def _on_reload(self) -> None:
         if self._current_html:
             self.render(self._current_html)
+        # else: nothing to reload after clear() — intentional no-op
