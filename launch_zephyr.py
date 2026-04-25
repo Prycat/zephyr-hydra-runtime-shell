@@ -51,6 +51,16 @@ def main():
         )
         return
 
+    # On Windows, QtWebEngineProcess.exe is launched as a subprocess by Qt and
+    # must be able to find Qt DLLs (Qt6WebEngineCore.dll etc.) on PATH.
+    # pip installs PySide6 into site-packages which is NOT on the system PATH,
+    # so we prepend it here — before any Qt module is imported.
+    if sys.platform == "win32":
+        pyside6_dir = os.path.dirname(PySide6.__file__)
+        current_path = os.environ.get("PATH", "")
+        if pyside6_dir not in current_path:
+            os.environ["PATH"] = pyside6_dir + os.pathsep + current_path
+
     # Check agent.py exists
     agent_path = os.path.join(here, "agent.py")
     if not os.path.exists(agent_path):
