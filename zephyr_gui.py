@@ -37,7 +37,7 @@ from PySide6.QtWidgets import (
 )
 
 # HTML preview pane
-from zephyr_html_preview import HtmlPreviewPane, extract_last_html_block
+from zephyr_html_preview import HtmlPreviewPane, extract_last_html_block, is_webengine_available  # noqa: F401
 
 _CONFIG_DEFAULTS = {
     "active_model": "hermes3:8b",
@@ -3828,6 +3828,9 @@ class MainWindow(QMainWindow):
 
     def _on_response_complete(self):
         """Show thumbs feedback bar briefly after each response."""
+        # Always attempt preview — harmless if no html block present.
+        # Must run before the session-ID guard so first-turn HTML renders.
+        self._try_show_preview()
         if not self._current_session_id:
             return
         # Must parent to viewport() — QPlainTextEdit's visible area is a child
@@ -3844,7 +3847,6 @@ class MainWindow(QMainWindow):
         bar.raise_()
         # Auto-hide after 8s if no vote
         bar._auto_hide_timer.start(8000)
-        self._try_show_preview()
 
     def _on_feedback(self, positive: bool):
         """Forward thumbs vote to agent via /feedback command."""
@@ -3864,7 +3866,8 @@ class MainWindow(QMainWindow):
             return
         self._preview.render(html)
         total = self._console_splitter.width()
-        half = max(total // 2, 400)
+        # Clamp so both panes retain at least 200 px; handles narrow windows safely.
+        half = min(max(total // 2, 200), max(total - 200, 200))
         self._console_splitter.setSizes([total - half, half])
 
     def _close_preview(self) -> None:
