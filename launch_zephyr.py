@@ -51,6 +51,13 @@ def main():
         )
         return
 
+    # Disable GPU compositing for QtWebEngine on Windows.
+    # IDCompositionDevice4 / DirectComposition is unavailable on many consumer
+    # GPUs/drivers; without this flag Chromium logs errors every frame and the
+    # WebEngine pane renders blank.  Must be set before QApplication is created.
+    if sys.platform == "win32":
+        os.environ.setdefault("QTWEBENGINE_CHROMIUM_FLAGS", "--disable-gpu")
+
     # On Windows, QtWebEngineProcess.exe is launched as a subprocess by Qt and
     # must be able to find Qt DLLs (Qt6WebEngineCore.dll etc.) on PATH.
     # pip installs PySide6 into site-packages which is NOT on the system PATH,

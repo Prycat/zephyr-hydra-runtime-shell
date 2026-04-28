@@ -1648,7 +1648,7 @@ class ConsoleWidget(QPlainTextEdit):
         # Pre-built char format used while streaming
         self._stream_fmt  = QTextCharFormat()
         self._stream_fmt.setForeground(QColor("#80ddca"))
-        self._stream_fmt.setFontFamily("Consolas")
+        self._stream_fmt.setFont(QFont("Consolas"))
 
         font = QFont("Consolas", 10)
         self.setFont(font)
