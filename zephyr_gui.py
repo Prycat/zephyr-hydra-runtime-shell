@@ -21,6 +21,30 @@ import json as _json
 import urllib.request
 import re
 
+# ── Windows: ensure PySide6 DLLs are findable by QtWebEngineProcess.exe ──────
+# Must run before any PySide6 import. MS Store Python doesn't add site-packages
+# to the system PATH, so the Qt subprocess can't locate Qt6WebEngineCore.dll.
+# importlib.util.find_spec locates PySide6 without importing it.
+if sys.platform == "win32":
+    try:
+        import importlib.util as _ilu
+        _spec = _ilu.find_spec("PySide6")
+        if _spec and _spec.submodule_search_locations:
+            _p6 = str(list(_spec.submodule_search_locations)[0])
+            if _p6 not in os.environ.get("PATH", ""):
+                os.environ["PATH"] = _p6 + os.pathsep + os.environ.get("PATH", "")
+            # add_dll_directory (Python 3.8+) registers the path with the
+            # Windows DLL loader for this process.
+            if hasattr(os, "add_dll_directory"):
+                try:
+                    os.add_dll_directory(_p6)
+                except OSError:
+                    pass
+        os.environ.setdefault("QTWEBENGINE_CHROMIUM_FLAGS", "--disable-gpu")
+        del _ilu, _spec, _p6
+    except Exception:
+        pass
+
 from PySide6.QtCore import (
     Qt, QThread, Signal, QTimer, QPointF, QRectF, QPoint, QRect, QEvent
 )
@@ -3675,8 +3699,9 @@ class MainWindow(QMainWindow):
         self._preview.close_requested.connect(self._close_preview)
         self._console_splitter.addWidget(self._preview)
 
-        # Hide preview pane initially
-        self._console_splitter.setSizes([1, 0])
+        # Hide preview completely at startup — a hidden QSplitter child takes
+        # zero space and shows no handle, avoiding any layout shift.
+        self._preview.hide()
         self._console_splitter.setCollapsible(0, False)  # console always visible
         self._console_splitter.setCollapsible(1, True)   # preview can collapse
 
@@ -3858,12 +3883,13 @@ class MainWindow(QMainWindow):
     def _try_show_preview(self) -> None:
         """
         Scan the console text for the last complete ```html block.
-        If found: render it in the preview pane and expand the sub-splitter to 50/50.
-        If not found: leave the preview collapsed.
+        If found: show and render the preview pane at 50/50 split.
+        If not found: leave the preview hidden.
         """
         html = extract_last_html_block(self._console.toPlainText())
         if not html:
             return
+        self._preview.show()
         self._preview.render(html)
         total = self._console_splitter.width()
         # Clamp so both panes retain at least 200 px; handles narrow windows safely.
@@ -3871,9 +3897,8 @@ class MainWindow(QMainWindow):
         self._console_splitter.setSizes([total - half, half])
 
     def _close_preview(self) -> None:
-        """Collapse the preview pane back to width=0 and clear it."""
-        total = self._console_splitter.width()
-        self._console_splitter.setSizes([total, 0])
+        """Hide the preview pane and clear it."""
+        self._preview.hide()
         self._preview.clear()
 
     def _show_model_card(self):
